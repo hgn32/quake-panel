@@ -8,7 +8,8 @@ export interface SettingsPanelDeps {
   closeButton: HTMLElement;
   getSettings: () => Settings;
   onChange: (patch: Partial<Settings>) => void;
-  onTestSound: () => void;
+  /** 音と画面明滅の両方を出すテスト */
+  onTest: () => void;
 }
 
 /**
@@ -50,10 +51,10 @@ export class SettingsPanel {
         (value) => this.deps.onChange({ notifyForecast: value === 'all' }),
       ),
       this.sliderRow('音量', settings.volume, (value) => this.deps.onChange({ volume: value })),
-      h(
-        'div',
-        { class: 'settings__row' },
-        h('button', { class: 'button', type: 'button', text: 'テスト再生' }, ),
+      this.row(
+        'テスト',
+        '実際の警報と同じ音と画面明滅を数秒だけ出します。',
+        h('button', { class: 'button', type: 'button', text: '音と明滅をテスト' }),
       ),
       this.radioRow(
         '地図の表示範囲',
@@ -82,7 +83,11 @@ export class SettingsPanel {
     );
 
     const testButton = this.deps.form.querySelector('button');
-    testButton?.addEventListener('click', () => this.deps.onTestSound());
+    testButton?.addEventListener('click', () => {
+      // 明滅は画面全体に出るので、確認できるよう設定画面を閉じる
+      this.close();
+      this.deps.onTest();
+    });
   }
 
   private radioRow(

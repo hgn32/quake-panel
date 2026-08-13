@@ -178,6 +178,9 @@ export interface StateSnapshot {
   eew: EewState | null;
   quakes: QuakeInfo[];
   tsunami: TsunamiInfo | null;
-  /** 利用地情報 (表示の既定中心・津波強調に使う) */
-  home: { name: string; lat: number; lon: number };
+  /**
+   * 利用地の座標 (表示の既定中心・履歴の強調に使う)。
+   * 地名は持たない。必要な都道府県名は背景地図から座標で引く。
+   */
+  home: { lat: number; lon: number };
 }

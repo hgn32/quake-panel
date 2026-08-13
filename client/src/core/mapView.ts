@@ -16,7 +16,7 @@ export interface MapViewOptions {
   /** 配信画像に焼き込まれた見出し帯を描かない (§KMONI_CAPTION_BOX の説明を参照) */
   hideCaption: boolean;
   mode: ViewMode;
-  home: { name: string; lat: number; lon: number };
+  home: { lat: number; lon: number };
 }
 
 interface Transform {
@@ -62,6 +62,15 @@ export class MapView {
     }
     this.observeResize();
     this.resize();
+  }
+
+  /**
+   * 座標にある都道府県名。背景地図が読めていなければ null。
+   * 利用地の県を地名の設定なしに知るために使う。
+   */
+  prefectureAt(lat: number, lon: number): string | null {
+    const p = projectToPixel(lat, lon);
+    return this.basemap.prefectureAtPixel(p.x, p.y);
   }
 
   dispose(): void {
@@ -183,7 +192,7 @@ export class MapView {
     ctx.restore();
   }
 
-  /** 津波予報区の強調。宮崎県沿岸 (利用地) は特に目立たせる (§3)。 */
+  /** 津波予報区の強調。利用地の予報区は特に目立たせる (§3)。 */
   private drawTsunamiAreas(ctx: CanvasRenderingContext2D): void {
     const tsunami = this.tsunami;
     if (!tsunami || tsunami.cancelled || tsunami.areas.length === 0) return;
@@ -210,8 +219,10 @@ export class MapView {
     ctx.save();
     ctx.translate(this.transform.offsetX, this.transform.offsetY);
     ctx.scale(this.transform.scale, this.transform.scale);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    // 観測点は 352x400 の画像に 1〜数ピクセルの四角として描かれている。
+    // 拡大時に補間を効かせると四角の輪郭が溶けて「ぼやけた点」になるので、
+    // ここは最近傍のまま引き伸ばして角を残す。
+    ctx.imageSmoothingEnabled = false;
 
     if (frame.estShindo) {
       ctx.globalAlpha = 0.75;

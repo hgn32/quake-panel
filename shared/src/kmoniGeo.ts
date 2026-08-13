@@ -107,9 +107,11 @@ export const KMONI_CAPTION_BOX = {
   height: 40,
 } as const;
 
-/** 表示の初期中心。利用地 (宮崎県延岡市) を既定とする。 */
+/**
+ * 表示の初期中心。設定されていないときの既定値なので、
+ * 特定の住所を示唆しない場所 (東京駅) を置いてある。
+ */
 export const HOME_LOCATION = {
-  name: '宮崎県延岡市',
-  lat: 32.582,
-  lon: 131.665,
+  lat: 35.681,
+  lon: 139.767,
 } as const;
