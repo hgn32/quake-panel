@@ -540,11 +540,6 @@ body.cursor-hidden * {
   color: #8fa6c6;
 }
 
-.quake-list__home {
-  margin-top: 2px;
-  font-size: 13px;
-  color: var(--accent);
-}
 
 .quake-list__tsunami {
   margin-top: 2px;
