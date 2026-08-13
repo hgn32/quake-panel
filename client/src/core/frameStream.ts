@@ -1,4 +1,5 @@
 import { ENDPOINTS, type FrameNotice } from '@quake-panel/shared';
+import { resolveUrl } from './urls.js';
 
 export interface FrameImages {
   notice: FrameNotice;
@@ -63,12 +64,12 @@ export class FrameStream {
 
     try {
       const [realtime, psWave, estShindo] = await Promise.all([
-        loadBitmap(ENDPOINTS.frame(notice.timestamp), controller.signal),
+        loadBitmap(resolveUrl(ENDPOINTS.frame(notice.timestamp)), controller.signal),
         notice.layers.psWave
-          ? loadBitmap(ENDPOINTS.psWave(notice.timestamp), controller.signal)
+          ? loadBitmap(resolveUrl(ENDPOINTS.psWave(notice.timestamp)), controller.signal)
           : Promise.resolve(null),
         notice.layers.estShindo
-          ? loadBitmap(ENDPOINTS.estShindo(notice.timestamp), controller.signal)
+          ? loadBitmap(resolveUrl(ENDPOINTS.estShindo(notice.timestamp)), controller.signal)
           : Promise.resolve(null),
       ]);
       if (controller.signal.aborted) {

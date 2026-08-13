@@ -1,3 +1,5 @@
+import { resolveUrl } from './urls.js';
+
 export interface BasemapPrefecture {
   code: number | null;
   name: string;
@@ -37,7 +39,7 @@ export class Basemap {
   /** 予報区の強調表示用に、名前から都道府県を引けるようにしておく */
   private byName = new Map<string, BasemapPrefecture>();
 
-  async load(url = '/assets/japan-map.json'): Promise<void> {
+  async load(url = resolveUrl('/assets/japan-map.json')): Promise<void> {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`背景地図を読み込めませんでした: HTTP ${res.status}`);
     this.data = (await res.json()) as BasemapData;

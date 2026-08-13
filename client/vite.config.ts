@@ -5,6 +5,10 @@ import { defineConfig } from 'vite';
  * 「1 ファイルにまとまっていて確実に読める」ことを優先する。
  */
 export default defineConfig({
+  // 配信されるパスが `/` とは限らない (Home Assistant の Ingress 経由では
+  // `/api/hassio_ingress/<token>/` の下に置かれる)。生成する参照を相対にして、
+  // どこに置かれても index.html からの相対で読めるようにする。
+  base: './',
   build: {
     target: 'es2022',
     outDir: 'dist',

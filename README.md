@@ -98,6 +98,17 @@ sudo htpasswd -c /etc/nginx/quake-panel.htpasswd <ユーザー名>
 
 Pi4 側は `deploy/kiosk/` を参照。
 
+### Home Assistant アドオン
+
+自分で nginx を立てる代わりに、Home Assistant のアドオンとして動かすこともできる。
+アドオン定義は [hgn32/ha-addons](https://github.com/hgn32/ha-addons) の
+`quake-panel/` にあり、このリポジトリの特定のコミットを固定してビルドする。
+
+Ingress 経由で開くと HA のログイン (入場制限) がそのまま利用条件 §2(1) の
+要件を満たすので、Basic 認証の設定は要らない。Pi4 のキオスクからは認証なしで
+開きたいので、アドオンは LAN 向けに直接ポートも開ける
+(インターネットへ素で公開しないこと、という条件は変わらない)。
+
 ### 開発
 
 ```bash
@@ -189,6 +200,15 @@ localStorage に端末ごとに保存される。サーバーの挙動は変わ�
 
 クライアント (Pi4 の Chromium) が話す相手は**このコンテナだけ**。
 リバースプロキシで https/wss を終端し、プロキシ↔コンテナ間は平文で構わない。
+
+表の**パスはサーバーから見たもの**で、公開 URL がこの通りとは限らない。
+Home Assistant の Ingress のように前置きパスの下へ置かれる場合、Supervisor は
+前置きを剥がしてから中継するのでサーバー側は何も変わらず、ずれるのは
+ブラウザ側の相対解決だけになる。そのため、
+**サーバーは `X-Ingress-Path` があれば `index.html` へ `<base href>` を差し込み**
+(`server/src/http/indexHtml.ts`)、**クライアントは全ての要求を
+`document.baseURI` 基準で組み立てる** (`client/src/core/urls.ts`)。
+素で `/` 直下に置いたときは `<base>` が入らず、従来どおりの絶対パスになる。
 
 | パス | プロトコル | 用途 |
 |---|---|---|

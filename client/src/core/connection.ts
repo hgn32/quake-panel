@@ -4,6 +4,7 @@ import {
   type ClientMessage,
   type ServerEvent,
 } from '@quake-panel/shared';
+import { resolveWsUrl } from './urls.js';
 
 export type ConnectionState = 'connecting' | 'open' | 'closed';
 
@@ -67,8 +68,7 @@ export class ServerConnection {
   private connect(): void {
     if (this.closed) return;
     this.setState('connecting');
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${location.host}${ENDPOINTS.ws}`);
+    const socket = new WebSocket(resolveWsUrl(ENDPOINTS.ws));
     this.socket = socket;
 
     socket.addEventListener('open', () => {

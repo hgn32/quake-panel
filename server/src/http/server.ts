@@ -4,6 +4,7 @@ import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
 import type { FrameLayer, KmoniFrameWorker } from '../sources/kmoniFrames.js';
+import { ingressBaseHref, serveIndexHtml } from './indexHtml.js';
 import { serveStatic } from './static.js';
 
 const log = createLogger('http');
@@ -76,11 +77,15 @@ export function createHttpServer(
       return;
     }
 
-    if (await serveStatic(staticRoot, path, res)) return;
+    // index.html だけは静的配信を通さない。前置きパス付きで公開されている
+    // 場合に `<base>` を差し込む必要がある (indexHtml.ts)。
+    const isIndex = path === '/' || path === '/index.html';
+    const isAppPath = !path.startsWith('/api/') && !path.startsWith('/kmoni/');
+    if (!isIndex && (await serveStatic(staticRoot, path, res))) return;
 
     // SPA ではないが、キオスクの URL 直打ちに備えて index.html へ寄せる
-    if (!path.startsWith('/api/') && !path.startsWith('/kmoni/')) {
-      if (await serveStatic(staticRoot, '/index.html', res)) return;
+    if (isIndex || isAppPath) {
+      if (await serveIndexHtml(staticRoot, ingressBaseHref(req), res)) return;
     }
 
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not found');
