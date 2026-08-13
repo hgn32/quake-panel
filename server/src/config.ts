@@ -54,6 +54,17 @@ export interface Config {
   wsHeartbeatMs: number;
   /** 保持する地震情報の件数 */
   quakeHistorySize: number;
+  /**
+   * Home Assistant への通知 (アドオンとして動かすときだけ有効になる)。
+   * apiUrl か token が空なら何もしない。
+   */
+  homeAssistant: {
+    apiUrl: string;
+    token: string;
+    /** States API で作った状態は HA 再起動で消えるので入れ直す間隔 */
+    refreshMs: number;
+    timeoutMs: number;
+  };
   /** EEW を「表示終了」とみなすまでの時間 (ms) */
   eewRetentionMs: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -85,6 +96,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     wsHeartbeatMs: num(env['WS_HEARTBEAT_MS'], 30_000),
     quakeHistorySize: num(env['QUAKE_HISTORY_SIZE'], 12),
+    homeAssistant: {
+      apiUrl: bool(env['HA_NOTIFY'], true) ? str(env['HA_API_URL'], '') : '',
+      token: str(env['SUPERVISOR_TOKEN'], ''),
+      refreshMs: num(env['HA_STATE_REFRESH_MS'], 60_000),
+      timeoutMs: num(env['HA_REQUEST_TIMEOUT_MS'], 4000),
+    },
     eewRetentionMs: num(env['EEW_RETENTION_MS'], 180_000),
     logLevel: (str(env['LOG_LEVEL'], 'info') as Config['logLevel']),
   };
