@@ -105,7 +105,7 @@ export interface TsunamiArea {
   firstHeightArrivalTime: string | null;
   maxHeightDescription: string | null;
   maxHeightValue: number | null;
-  /** 利用地 (§1: 日向灘沿岸) に該当する予報区か */
+  /** 利用地に該当する予報区か (表示側が設定に従って印を付ける) */
   isHome: boolean;
 }
 
@@ -179,8 +179,7 @@ export interface StateSnapshot {
   quakes: QuakeInfo[];
   tsunami: TsunamiInfo | null;
   /**
-   * 利用地の座標 (表示の既定中心・履歴の強調に使う)。
-   * 地名は持たない。必要な都道府県名は背景地図から座標で引く。
+   * 利用地や表示の設定はサーバーが持たない。
+   * 端末ごとに localStorage / URL で決める (§3)。
    */
-  home: { lat: number; lon: number };
 }

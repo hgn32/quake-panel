@@ -1,4 +1,3 @@
-import { HOME_LOCATION } from '@quake-panel/shared';
 
 const num = (value: string | undefined, fallback: number): number => {
   if (value === undefined || value.trim() === '') return fallback;
@@ -13,6 +12,12 @@ const bool = (value: string | undefined, fallback: boolean): boolean => {
 
 const str = (value: string | undefined, fallback: string): string =>
   value === undefined || value.trim() === '' ? fallback : value.trim();
+
+/** 秒で渡される設定。0.5 秒未満や極端な値は上流に迷惑なので丸める。 */
+const sec = (value: string | undefined, fallback: number): number => {
+  const n = num(value, fallback);
+  return Math.min(Math.max(n, 0.5), 60);
+};
 
 export interface Config {
   port: number;
@@ -51,10 +56,6 @@ export interface Config {
   quakeHistorySize: number;
   /** EEW を「表示終了」とみなすまでの時間 (ms) */
   eewRetentionMs: number;
-  /** 利用地の座標。地名は持たない (必要な都道府県名はクライアントが座標から引く)。 */
-  home: { lat: number; lon: number };
-  /** 津波予報で強調する予報区名 */
-  tsunamiHomeAreas: string[];
   logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
@@ -65,8 +66,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     staticDir: str(env['STATIC_DIR'], 'public'),
     kmoni: {
       baseUrl: str(env['KMONI_BASE_URL'], 'http://www.kmoni.bosai.go.jp'),
-      idleFrameIntervalMs: num(env['KMONI_IDLE_FRAME_INTERVAL_MS'], 1000),
-      activeFrameIntervalMs: num(env['KMONI_ACTIVE_FRAME_INTERVAL_MS'], 1000),
+      // 秒で受けて ms に直す。上流への負荷を決める値なので、
+      // 端末ごとではなくサーバーの設定として持つ (§2)。
+      idleFrameIntervalMs: sec(env['KMONI_IDLE_FRAME_INTERVAL_SEC'], 1) * 1000,
+      activeFrameIntervalMs: sec(env['KMONI_ACTIVE_FRAME_INTERVAL_SEC'], 1) * 1000,
       eewIntervalMs: num(env['KMONI_EEW_INTERVAL_MS'], 1000),
       clockSyncIntervalMs: num(env['KMONI_CLOCK_SYNC_INTERVAL_MS'], 60_000),
       frameLagSeconds: num(env['KMONI_FRAME_LAG_SECONDS'], 2),
@@ -83,14 +86,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     wsHeartbeatMs: num(env['WS_HEARTBEAT_MS'], 30_000),
     quakeHistorySize: num(env['QUAKE_HISTORY_SIZE'], 12),
     eewRetentionMs: num(env['EEW_RETENTION_MS'], 180_000),
-    home: {
-      lat: num(env['HOME_LAT'], HOME_LOCATION.lat),
-      lon: num(env['HOME_LON'], HOME_LOCATION.lon),
-    },
-    tsunamiHomeAreas: str(env['TSUNAMI_HOME_AREAS'], '東京都')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
     logLevel: (str(env['LOG_LEVEL'], 'info') as Config['logLevel']),
   };
 }

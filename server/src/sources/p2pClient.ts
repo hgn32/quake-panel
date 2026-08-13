@@ -59,7 +59,7 @@ export class P2PClient {
         timeoutMs: 8000,
       });
       const latest = tsunami[0];
-      if (latest) this.hub.seedTsunami(parseTsunami(latest, now, this.config.tsunamiHomeAreas));
+      if (latest) this.hub.seedTsunami(parseTsunami(latest, now));
     } catch (error) {
       log.warn(`tsunami history seed failed: ${describeError(error)}`);
     }
@@ -114,7 +114,7 @@ export class P2PClient {
         this.hub.publishQuake(parseQuake(msg as P2PQuake, now));
         break;
       case P2P_CODES.tsunami:
-        this.hub.publishTsunami(parseTsunami(msg as P2PTsunami, now, this.config.tsunamiHomeAreas));
+        this.hub.publishTsunami(parseTsunami(msg as P2PTsunami, now));
         break;
       case P2P_CODES.eewDetection:
         this.hub.publishEewDetection(parseEewDetection(msg as P2PEewDetection, now));

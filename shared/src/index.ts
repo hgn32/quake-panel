@@ -3,4 +3,5 @@ export * from './kmoniGeo.js';
 export * from './models.js';
 export * from './polygon.js';
 export * from './protocol.js';
+export * from './tsunami.js';
 export * from './time.js';

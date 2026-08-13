@@ -59,7 +59,6 @@ const GRADES = new Set<TsunamiGrade>(['MajorWarning', 'Warning', 'Watch', 'Unkno
 export function parseTsunami(
   msg: P2PTsunami,
   receivedAt: Date,
-  homeAreas: readonly string[],
 ): TsunamiInfo {
   const areas: TsunamiArea[] = (msg.areas ?? []).map((a) => {
     const name = a.name ?? '';
@@ -72,7 +71,8 @@ export function parseTsunami(
       firstHeightArrivalTime: toIso(parseJstDateTime(a.firstHeight?.arrivalTime)),
       maxHeightDescription: a.maxHeight?.description ?? null,
       maxHeightValue: nz(a.maxHeight?.value),
-      isHome: homeAreas.some((h) => name.includes(h)),
+      // 利用地に関わるかどうかは端末ごとの設定なので、表示側が印を付ける
+      isHome: false,
     };
   });
   return {
@@ -80,7 +80,7 @@ export function parseTsunami(
     issuedAt: toIso(parseJstDateTime(msg.issue?.time ?? msg.time)),
     cancelled: msg.cancelled === true,
     areas,
-    affectsHome: areas.some((a) => a.isHome),
+    affectsHome: false,
     receivedAt: receivedAt.toISOString(),
   };
 }

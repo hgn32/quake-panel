@@ -714,3 +714,20 @@ body.cursor-hidden * {
     overflow-y: auto;
   }
 }
+
+/* 利用地の緯度経度と、津波予報区の入力 */
+.settings__coord {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.settings__number {
+  width: 96px;
+}
+
+.settings__text {
+  min-width: 220px;
+}

@@ -1,4 +1,5 @@
 import {
+  applyHomeAreas,
   formatJstClock,
   intensityColor,
   intensityLabel,
@@ -12,8 +13,8 @@ import {
 import { AlertPresenter } from './core/alert.js';
 import { ServerConnection, type ConnectionState } from './core/connection.js';
 import { FrameStream } from './core/frameStream.js';
-import { MapView } from './core/mapView.js';
-import { loadSettings, saveSettings, type Settings } from './settings.js';
+import { MapView, fullMapView, homeMapView, type MapViewState } from './core/mapView.js';
+import { SettingsStore, type Settings } from './settings.js';
 import { h, replaceChildren, requireElement } from './ui/dom.js';
 import { EewPanel } from './ui/eewPanel.js';
 import { QuakeList } from './ui/quakeList.js';
@@ -30,7 +31,8 @@ const LEGEND_STEPS = [10, 20, 30, 40, 45, 50, 55, 60, 70];
  * 「たまにしか変わらない UI」だけを触る (§5 推奨構成)。
  */
 export class App {
-  private settings: Settings = loadSettings();
+  private readonly store = new SettingsStore();
+  private settings: Settings = this.store.current;
   private readonly alert: AlertPresenter;
   private readonly mapView: MapView;
   private readonly frames: FrameStream;
@@ -44,21 +46,26 @@ export class App {
   private quakes: QuakeInfo[] = [];
   private tsunami: TsunamiInfo | null = null;
   private eew: EewState | null = null;
-  private home = { lat: 35, lon: 135 };
   private clockTimer: number | null = null;
   private cursorTimer: number | null = null;
   private testFlashTimer: number | null = null;
+  private viewSaveTimer: number | null = null;
 
   constructor() {
     this.alert = new AlertPresenter(requireElement('flash'));
     this.alert.audio.setVolume(this.settings.volume);
 
-    this.mapView = new MapView(requireElement<HTMLCanvasElement>('map'), {
-      glow: this.settings.glow,
-      hideCaption: this.settings.hideCaption,
-      mode: this.settings.mapMode,
-      home: this.home,
-    });
+    this.mapView = new MapView(
+      requireElement<HTMLCanvasElement>('map'),
+      {
+        glow: this.settings.glow,
+        hideCaption: this.settings.hideCaption,
+        view: this.settings.view,
+        interactive: !this.settings.locked,
+        home: this.settings.home,
+      },
+      (view) => this.saveViewLater(view),
+    );
     this.frames = new FrameStream((frame) => {
       this.mapView.setFrame(frame);
       this.statusBar.setFrameTime(frame.notice.isoTime, frame.notice.latencyMs);
@@ -79,8 +86,14 @@ export class App {
       openButton: requireElement('settings-open'),
       closeButton: requireElement('settings-close'),
       getSettings: () => this.settings,
+      isFixedByUrl: (key) => this.store.isFixedByUrl(key),
       onChange: (patch) => this.applySettings(patch),
       onTest: () => this.runAlertTest(),
+      onPickHome: () => this.startHomePick(),
+      onResetView: (preset) =>
+        this.applySettings({
+          view: preset === 'home' ? homeMapView(this.settings.home) : fullMapView(),
+        }),
     });
 
     this.connection = new ServerConnection({
@@ -95,6 +108,7 @@ export class App {
     this.setupAudioGate();
     this.setupCursorAutoHide();
     await this.mapView.init();
+    this.refreshHomeHints();
     this.connection.start();
 
     // タブが再表示されたときは取りこぼしを疑って現況を取り直す
@@ -140,12 +154,6 @@ export class App {
   }
 
   private applySnapshot(snapshot: StateSnapshot): void {
-    this.home = snapshot.home;
-    this.mapView.setOptions({ home: snapshot.home });
-    // 利用地の県は座標から引く。地名を設定させないための遠回りだが、
-    // 履歴で「自分の県の観測点」を前に出すにはこれで足りる。
-    const prefecture = this.mapView.prefectureAt(snapshot.home.lat, snapshot.home.lon);
-    this.quakeList.setHomeHints(prefecture ? [prefecture] : []);
     this.quakes = snapshot.quakes;
     this.renderQuakes();
     this.applyHealth(snapshot.health);
@@ -167,7 +175,9 @@ export class App {
     this.refreshFlash();
   }
 
-  private applyTsunami(tsunami: TsunamiInfo | null): void {
+  private applyTsunami(info: TsunamiInfo | null): void {
+    // どの予報区を自分ごとにするかは端末ごとの設定なので、ここで印を付ける
+    const tsunami = info ? applyHomeAreas(info, this.settings.tsunamiAreas) : null;
     this.tsunami = tsunami;
     this.tsunamiPanel.update(tsunami);
     this.mapView.setTsunami(tsunami);
@@ -190,16 +200,65 @@ export class App {
   }
 
   private applySettings(patch: Partial<Settings>): void {
-    this.settings = { ...this.settings, ...patch };
-    saveSettings(this.settings);
+    const before = this.settings;
+    this.settings = this.store.update(patch);
     this.alert.audio.setVolume(this.settings.volume);
     this.mapView.setOptions({
       glow: this.settings.glow,
       hideCaption: this.settings.hideCaption,
-      mode: this.settings.mapMode,
+      view: this.settings.view,
+      interactive: !this.settings.locked,
+      home: this.settings.home,
     });
+    if (
+      before.home.lat !== this.settings.home.lat ||
+      before.home.lon !== this.settings.home.lon
+    ) {
+      this.refreshHomeHints();
+    }
+    if (before.tsunamiAreas !== this.settings.tsunamiAreas) {
+      // 印の付け直し (表示中の予報にも即座に効かせる)
+      this.applyTsunami(this.tsunami);
+    }
     this.refreshFlash();
     this.renderQuakes();
+  }
+
+  /** 利用地の県は座標から引く。地名を設定させないための遠回り。 */
+  private refreshHomeHints(): void {
+    const prefecture = this.mapView.prefectureAt(this.settings.home.lat, this.settings.home.lon);
+    this.quakeList.setHomeHints(prefecture ? [prefecture] : []);
+  }
+
+  /** 地図から利用地を選ぶ。選ぶまでは案内を出しておく。 */
+  private startHomePick(): void {
+    this.statusBar.setNotice('地図をクリックして利用地を選んでください (Esc で取消)');
+    const cancel = (ev: KeyboardEvent): void => {
+      if (ev.key !== 'Escape') return;
+      this.mapView.cancelPick();
+      finish();
+    };
+    const finish = (): void => {
+      document.removeEventListener('keydown', cancel);
+      this.statusBar.setNotice(null);
+    };
+    document.addEventListener('keydown', cancel);
+    this.mapView.startPick((location) => {
+      finish();
+      this.applySettings({ home: { lat: round3(location.lat), lon: round3(location.lon) } });
+    });
+  }
+
+  /**
+   * スクロール・拡大のたびに保存すると書き込みが多すぎるので、
+   * 手が止まってからまとめて保存する。
+   */
+  private saveViewLater(view: MapViewState): void {
+    if (this.viewSaveTimer !== null) window.clearTimeout(this.viewSaveTimer);
+    this.viewSaveTimer = window.setTimeout(() => {
+      this.viewSaveTimer = null;
+      this.settings = this.store.update({ view });
+    }, 400);
   }
 
   private startClock(): void {
@@ -291,9 +350,15 @@ export class App {
     if (this.clockTimer !== null) window.clearInterval(this.clockTimer);
     if (this.cursorTimer !== null) window.clearTimeout(this.cursorTimer);
     if (this.testFlashTimer !== null) window.clearTimeout(this.testFlashTimer);
+    if (this.viewSaveTimer !== null) window.clearTimeout(this.viewSaveTimer);
     this.connection.stop();
     this.frames.dispose();
     this.mapView.dispose();
     this.eewPanel.dispose();
   }
+}
+
+/** 緯度経度は 3 桁もあれば十分 (約 100m)。無駄に長い値を保存しない。 */
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }

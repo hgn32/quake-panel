@@ -12,6 +12,7 @@ export class StatusBar {
   private health: HealthState | null = null;
   private frameLatencyMs = 0;
   private hasFrame = false;
+  private manualNotice: string | null = null;
 
   constructor(
     private readonly link: HTMLElement,
@@ -63,12 +64,21 @@ export class StatusBar {
     setChip(this.kmoni, '強震モニタ', '受信中', 'ok');
   }
 
+  /**
+   * 操作の案内など、状態とは関係なく出したいメッセージ。
+   * null に戻すと通常の状態表示へ戻る。
+   */
+  setNotice(message: string | null): void {
+    this.manualNotice = message;
+    this.renderNotice();
+  }
+
   /** 接続断のほうが重い異常なので、劣化モードの案内より優先して出す。 */
   private renderNotice(): void {
-    let message: string | null = null;
-    if (this.connection !== 'open') {
+    let message: string | null = this.manualNotice;
+    if (message === null && this.connection !== 'open') {
       message = 'サーバーに接続できません。再接続を試みています…';
-    } else if (this.health?.degraded) {
+    } else if (message === null && this.health?.degraded) {
       // 劣化モード: kmoni が止まっていても P2P の地震情報だけで継続する (§4)
       message = '強震モニタに接続できません。地震情報のみで表示を継続しています。';
     }
