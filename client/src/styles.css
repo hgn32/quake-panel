@@ -631,6 +631,8 @@ body.cursor-hidden * {
 
 .modal__body {
   width: min(560px, 92vw);
+  /* 中身が広がっても横スクロールさせない */
+  overflow-x: hidden;
   max-height: 86vh;
   overflow-y: auto;
   background: var(--panel);
@@ -647,8 +649,8 @@ body.cursor-hidden * {
 
 .settings__row {
   display: grid;
-  /* 説明文が縦長に潰れないよう、ラベル側に下限を持たせる */
-  grid-template-columns: minmax(260px, 1fr) auto;
+  /* ラベル側は縮んでよい。狭い画面で操作部がはみ出すほうが困る。 */
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
   padding: 12px 0;
@@ -670,6 +672,9 @@ body.cursor-hidden * {
 .settings__options {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  /* 幅が足りなければ折り返す (押し出して画面外に出さない) */
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -935,4 +940,24 @@ body.cursor-hidden * {
 .map-legend__end {
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* 狭い画面では設定を 1 列にする (操作部が画面外へ押し出されるのを防ぐ) */
+@media (max-width: 700px) {
+  .settings__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .settings__options,
+  .settings__stack {
+    justify-content: flex-start;
+    align-items: flex-start;
+  }
+
+  .settings select[multiple],
+  .settings__text {
+    width: 100%;
+    min-width: 0;
+  }
 }
