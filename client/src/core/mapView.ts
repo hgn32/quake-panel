@@ -20,6 +20,18 @@ export interface MapViewState {
   zoom: number;
 }
 
+/** 暗い観測点をどれだけ明るく寄せるか (0 で無調整) */
+const LIFT = 0.3;
+
+/**
+ * 観測点の色の明るさ調整。凡例も同じ見え方にするために公開している。
+ * 暗い色ほど白へ寄せるだけで、色相は変えない。
+ */
+export function liftPointColor(r: number, g: number, b: number): [number, number, number] {
+  const lift = LIFT * (1 - (0.299 * r + 0.587 * g + 0.114 * b) / 255);
+  return [r + (255 - r) * lift, g + (255 - g) * lift, b + (255 - b) * lift];
+}
+
 /** 拡大率の範囲。1 未満は余白が増えるだけなので許さない。 */
 export const ZOOM_RANGE = { min: 1, max: 8 } as const;
 
@@ -479,9 +491,15 @@ export class MapView {
         if (src[i + 3] === 0) continue;
         // 右と下が埋まっていない画素 = 四角の右端・下端なので落とす
         if (src[i + 7] === 0 || src[i + width * 4 + 3] === 0) continue;
-        out[i] = src[i] ?? 0;
-        out[i + 1] = src[i + 1] ?? 0;
-        out[i + 2] = src[i + 2] ?? 0;
+        const r = src[i] ?? 0;
+        const g = src[i + 1] ?? 0;
+        const b = src[i + 2] ?? 0;
+        // 平常時の色 (濃い青) は黒い背景の上だと重く沈む。暗い色ほど白へ寄せて
+        // 明るくする。色相は変えないので、強い揺れの色 (黄〜赤) はほぼそのまま。
+        const [lr, lg, lb] = liftPointColor(r, g, b);
+        out[i] = lr;
+        out[i + 1] = lg;
+        out[i + 2] = lb;
         out[i + 3] = src[i + 3] ?? 0;
       }
     }

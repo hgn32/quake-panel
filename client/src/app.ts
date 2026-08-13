@@ -2,8 +2,6 @@ import {
   applyHomeAreas,
   formatJstClock,
   tsunamiAreasForPrefecture,
-  intensityColor,
-  intensityLabel,
   type EewState,
   type HealthState,
   type QuakeInfo,
@@ -14,7 +12,14 @@ import {
 import { AlertPresenter } from './core/alert.js';
 import { ServerConnection, type ConnectionState } from './core/connection.js';
 import { FrameStream } from './core/frameStream.js';
-import { MapView, ZOOM_RANGE, fullMapView, homeMapView, type MapViewState } from './core/mapView.js';
+import {
+  MapView,
+  ZOOM_RANGE,
+  fullMapView,
+  homeMapView,
+  liftPointColor,
+  type MapViewState,
+} from './core/mapView.js';
 import { SettingsStore, type Settings } from './settings.js';
 import { h, replaceChildren, requireElement } from './ui/dom.js';
 import { EewPanel } from './ui/eewPanel.js';
@@ -23,7 +28,28 @@ import { SettingsPanel } from './ui/settingsPanel.js';
 import { StatusBar } from './ui/statusBar.js';
 import { TsunamiPanel } from './ui/tsunamiPanel.js';
 
-const LEGEND_STEPS = [10, 20, 30, 40, 45, 50, 55, 60, 70];
+/**
+ * 地図に出ている色の凡例。
+ *
+ * 強震モニタのリアルタイム震度は、気象庁の震度階級 (1〜7 の段階) ではなく
+ * 連続的な指標で、青 → 水色 → 緑 → 黄 → 赤 と変わる。段階の凡例を並べると
+ * 「地図の色と違う」ことになるので、実際に配信されている色の並びを出す。
+ *
+ * 低い側は配信画像から実際に出ている色 (#0000cd〜#32f147)、
+ * 高い側は同じ並びの延長。段階との対応は示さない (色から値は読まない §2(2))。
+ */
+const REALTIME_SCALE_COLORS = [
+  '#0000cd',
+  '#0040f5',
+  '#0070d8',
+  '#0099b7',
+  '#00c296',
+  '#32f147',
+  '#e8e839',
+  '#f2a13a',
+  '#e8452e',
+  '#c026a8',
+];
 
 /**
  * 画面全体の取りまとめ。
@@ -415,14 +441,22 @@ export class App {
 
   private renderLegend(): void {
     const legend = requireElement('map-legend');
+    const bar = h('span', { class: 'map-legend__bar' });
+    // 地図の観測点と同じ明るさ調整を通しておく (凡例と地図の見え方を揃える)
+    const colors = REALTIME_SCALE_COLORS.map((hex) => {
+      const value = Number.parseInt(hex.slice(1), 16);
+      const [r, g, b] = liftPointColor((value >> 16) & 255, (value >> 8) & 255, value & 255);
+      return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+    });
+    bar.style.background = `linear-gradient(90deg, ${colors.join(', ')})`;
+    legend.title =
+      '強震モニタのリアルタイム震度の色。気象庁の震度階級 (履歴に出る 1〜7) とは別の指標です。';
     replaceChildren(
       legend,
-      h('span', { class: 'map-legend__title', text: '震度' }),
-      ...LEGEND_STEPS.filter((s) => s !== 46).map((scale) => {
-        const chip = h('span', { class: 'map-legend__chip', text: intensityLabel(scale) ?? '' });
-        chip.style.background = intensityColor(scale);
-        return chip;
-      }),
+      h('span', { class: 'map-legend__title', text: 'リアルタイム震度' }),
+      h('span', { class: 'map-legend__end', text: '弱' }),
+      bar,
+      h('span', { class: 'map-legend__end', text: '強' }),
     );
   }
 
