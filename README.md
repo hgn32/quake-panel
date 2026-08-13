@@ -140,6 +140,9 @@ npm run typecheck
 |---|---|---|
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | 待ち受け |
 | `STATIC_DIR` | `public` | クライアントのビルド成果物の場所 |
+| `HA_API_URL` | (空) | Home Assistant のコア API。設定すると EEW 等を HA へ通知する (アドオンでは `http://supervisor/core/api`) |
+| `SUPERVISOR_TOKEN` | (空) | 上記の認証トークン。Supervisor がアドオンへ自動で渡す |
+| `HA_NOTIFY` | `true` | `false` で HA への通知を止める |
 | `KMONI_IDLE_FRAME_INTERVAL_SEC` | `1` | 平常時の画像取得間隔 (秒)。負荷を抑えたいなら `2` |
 | `KMONI_ACTIVE_FRAME_INTERVAL_SEC` | `1` | EEW 発表中の画像取得間隔 (秒) |
 | `KMONI_EEW_INTERVAL_MS` | `1000` | EEW JSON のポーリング間隔 |
@@ -186,6 +189,55 @@ URL で指定されている項目は設定画面でも編集できないよう�
 |---|---|---|
 | `lat` / `lon` | `?lat=35.681&lon=139.767` | 利用地。両方揃っているときだけ効く |
 | `tsunami` | `?tsunami=東京都,千葉県` | 強調する津波予報区 (カンマ区切り) |
+
+---
+
+## Home Assistant への通知
+
+`HA_API_URL` と `SUPERVISOR_TOKEN` があるとき (= HA のアドオンとして動いているとき)、
+緊急地震速報などを Home Assistant へ流す。**画面を見ていなくても HA 側で気づける**
+ようにするためで、「EEW が出たらダッシュボードを地震パネルに切り替える」
+といった自動化に使える。
+
+### イベント
+
+続報のたびではなく、**意味が変わったときだけ**発火する
+(同じ地震で震度や警報種別が変わらない続報では出さない)。
+
+| イベント | いつ | 主なデータ |
+|---|---|---|
+| `quake_panel_eew` | 緊急地震速報の受信・格上げ・取消 | `is_warning` / `max_intensity` / `hypocenter` / `report_number` / `is_cancel` / `is_training` |
+| `quake_panel_tsunami` | 津波予報の発表・解除 | `active` / `areas` / `grades` |
+| `quake_panel_quake` | 地震情報 (551) の受信 | `max_intensity` / `hypocenter` / `magnitude` / `occurred_at` |
+
+### エンティティ
+
+| エンティティ | 内容 |
+|---|---|
+| `binary_sensor.quake_panel_eew` | 緊急地震速報の発表中 (訓練報・取消では `off`) |
+| `sensor.quake_panel_eew_intensity` | 予想最大震度 (`5強` など) |
+| `binary_sensor.quake_panel_tsunami` | 津波予報の発表中 |
+| `sensor.quake_panel_last_quake` | 最新の地震情報の最大震度 |
+
+States API で作る状態は HA を再起動すると消えるため、60 秒ごとに入れ直している
+(`HA_STATE_REFRESH_MS`)。通知が失敗してもパネルの表示は止めない。
+
+### 自動化の例
+
+```yaml
+automation:
+  - alias: 緊急地震速報でダッシュボードを切り替える
+    triggers:
+      - trigger: event
+        event_type: quake_panel_eew
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.event.data.is_warning and not trigger.event.data.is_training }}"
+    actions:
+      - action: browser_mod.navigate
+        data:
+          path: /lovelace/quake
+```
 
 ---
 

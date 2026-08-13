@@ -2,6 +2,7 @@ import { loadConfig } from './config.js';
 import { EewCoordinator } from './eew/coordinator.js';
 import { createHttpServer } from './http/server.js';
 import { Hub } from './hub.js';
+import { HomeAssistantNotifier } from './haNotify.js';
 import { createLogger, describeError, setLogLevel } from './logger.js';
 import { KmoniClock } from './sources/kmoniClock.js';
 import { KmoniEewWorker } from './sources/kmoniEew.js';
@@ -28,6 +29,8 @@ async function main(): Promise<void> {
 
   const httpServer = createHttpServer(config, hub, frames);
   const wsServer = new ClientWebSocketServer(httpServer, config, hub);
+  // Home Assistant のアドオンとして動いているときだけ有効になる
+  const haNotifier = new HomeAssistantNotifier(config, hub);
 
   // 時刻同期だけは先に済ませる。ここがずれていると最初のフレーム取得が全部 404 になる。
   await clock.start();
@@ -37,6 +40,7 @@ async function main(): Promise<void> {
   wsServer.start();
   await p2p.seedHistory();
   p2p.start();
+  haNotifier.start();
 
   await new Promise<void>((resolvePromise, reject) => {
     httpServer.once('error', reject);
@@ -55,6 +59,7 @@ async function main(): Promise<void> {
     kmoniEew.stop();
     coordinator.stop();
     p2p.stop();
+    haNotifier.stop();
     void wsServer.stop().then(() => {
       httpServer.close(() => process.exit(0));
       // 接続が残っていても一定時間で必ず落とす (コンテナ再起動を待たせない)
