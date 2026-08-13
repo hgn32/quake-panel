@@ -156,8 +156,9 @@ localStorage に端末ごとに保存される。サーバーの挙動は変わ�
 ### サーバー → 外部 (上流)
 
 **外部と通信するのはサーバーだけ**。ファイアウォールや送信許可リストを設定する
-場合はこの一覧が対象になる。宛先ホストは 2 つ (`www.kmoni.bosai.go.jp` と
-`api.p2pquake.net`) のみ。
+場合はこの一覧が対象になる。**稼働中**の宛先ホストは 2 つ
+(`www.kmoni.bosai.go.jp` と `api.p2pquake.net`) のみ。
+ビルド時・保守時には別の宛先が要る (後述)。
 
 | 宛先 | プロトコル | 頻度 | 用途 |
 |---|---|---|---|
@@ -229,14 +230,30 @@ localStorage に端末ごとに保存される。サーバーの挙動は変わ�
 自分から張り直す (劣化モード中はフレーム通知が止まって無通信になりうるため)。
 再接続は指数バックオフ (1 秒 → 最大 30 秒)。
 
-### 開発・保守時にだけ使う外部接続
+### ビルド時・保守時にだけ使う外部接続
 
-常時稼働には不要。スクリプトを手で流したときだけ発生する。
+**稼働中は不要**。イメージを作るときと、保守スクリプトを手で流したときにだけ発生する。
+稼働中だけを絞った送信許可リストを組むなら、ビルドは別の経路で行うか、
+ビルド時だけ一時的に開ける必要がある。
 
 | 宛先 | いつ | 用途 |
 |---|---|---|
+| Docker レジストリ (`registry-1.docker.io` ほか) | `docker compose build` | ベースイメージ `node:22-bookworm-slim` の取得 |
+| `https://registry.npmjs.org` | `docker compose build` / `npm install` | 依存パッケージの取得 |
 | `https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson` | `scripts/build-basemap.mjs` 実行時 | 背景地図の元データ (行政区域) |
 | `http://www.kmoni.bosai.go.jp/data/map_img/CommonImg/base_map_w.gif` | `scripts/calibrate-kmoni-map.py` 実行時 | 座標系の較正に使う基図 |
+
+背景地図 (`client/public/assets/japan-map.json`) は生成済みのものをリポジトリに
+コミットしてあるので、**ビルドのたびに GeoJSON を取りに行くことはない**。
+`scripts/` は Docker イメージにも含めていない (`.dockerignore`)。
+
+実行時の依存パッケージは `ws` (WebSocket) の 1 つだけで、クライアント側は
+外部依存ゼロ。Web フォントや CDN の類も一切参照していないので、
+**ブラウザが自オリジン以外へ出ていくことはない**。
+
+> 補足: Pi4 の OS や Chromium 自体が行う通信 (パッケージ更新、ブラウザの
+> コンポーネント更新など) はこのアプリの管轄外。ネットワークを厳しく絞る場合は
+> そちらも別途確認すること。
 
 ---
 
