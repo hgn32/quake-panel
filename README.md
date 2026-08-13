@@ -8,7 +8,8 @@
 - データ源: 強震モニタ (防災科学技術研究所) / P2P地震情報 — **いずれも無償**
 
 設計の経緯と判断は `docs/技術検討書.md`、上流エンドポイントの実測結果は
-`docs/kmoni-endpoints.md` にある。以下の説明で「§」はこの検討書の節番号を指す。
+`docs/kmoni-endpoints.md`、未了の作業と割り切りは `docs/残課題.md` にある。
+以下の説明で「§」はこの検討書の節番号を指す。
 
 <!-- 画面イメージ: 平常時は日本全体のリアルタイム震度マップ + 右側に地震情報履歴、
      EEW 受信時は予想最大震度の大型表示と赤い明滅に切り替わる -->
@@ -150,18 +151,92 @@ localStorage に端末ごとに保存される。サーバーの挙動は変わ�
 
 ---
 
-## エンドポイント
+## 接続先とプロトコル
 
-| パス | 用途 |
-|---|---|
-| `GET /` | パネル本体 |
-| `GET /ws` | イベント配信 (WebSocket) |
-| `GET /api/state` | 現況一括 (JSON)。デバッグ用 |
-| `GET /healthz` | 死活。劣化モードでも P2P が生きていれば 200 |
-| `GET /kmoni/latest.gif` | 最新のリアルタイム震度画像 |
-| `GET /kmoni/frame/{ts}.gif` | タイムスタンプ指定 (不変なのでキャッシュ可) |
-| `GET /kmoni/pswave/{ts}.gif` | 予測円 (EEW 発表中のみ) |
-| `GET /kmoni/estshindo/{ts}.gif` | 予想震度 (EEW 発表中のみ) |
+### サーバー → 外部 (上流)
+
+**外部と通信するのはサーバーだけ**。ファイアウォールや送信許可リストを設定する
+場合はこの一覧が対象になる。宛先ホストは 2 つ (`www.kmoni.bosai.go.jp` と
+`api.p2pquake.net`) のみ。
+
+| 宛先 | プロトコル | 頻度 | 用途 |
+|---|---|---|---|
+| `http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json` | HTTP/1.1 GET | 60 秒ごと | 基準時刻。端末時計のズレと配信遅れの補正 |
+| `http://www.kmoni.bosai.go.jp/webservice/hypo/eew/{YYYYMMDDhhmmss}.json` | HTTP/1.1 GET | **毎秒** | 緊急地震速報 (予報・警報)。無償で予報まで取れる唯一の経路 |
+| `http://www.kmoni.bosai.go.jp/data/map_img/RealTimeImg/jma_s/{YYYYMMDD}/{ts}.jma_s.gif` | HTTP/1.1 GET | **毎秒** | リアルタイム震度画像 (352×400 GIF、約 7.9KB) |
+| `http://www.kmoni.bosai.go.jp/data/map_img/PSWaveImg/eew/{YYYYMMDD}/{ts}.eew.gif` | HTTP/1.1 GET | EEW 発表中のみ毎秒 | P/S 波の予測円 |
+| `http://www.kmoni.bosai.go.jp/data/map_img/EstShindoImg/eew/{YYYYMMDD}/{ts}.eew.gif` | HTTP/1.1 GET | EEW 発表中のみ毎秒 | 予想震度 |
+| `wss://api.p2pquake.net/v2/ws` | **WebSocket over TLS** | 常時接続 **1 本** | 551 地震情報 / 552 津波予報 / 554 EEW 発表検出 / 556 EEW (警報) |
+| `https://api.p2pquake.net/v2/history?codes=551&limit=12` | HTTPS GET | 起動時 1 回 | 地震情報の履歴シード (起動直後に画面が空にならないように) |
+| `https://api.p2pquake.net/v2/history?codes=552&limit=1` | HTTPS GET | 起動時 1 回 | 津波予報の現況シード |
+
+宛先は環境変数で差し替えられる (`KMONI_BASE_URL` / `P2P_WS_URL` / `P2P_HISTORY_URL`)。
+検証時に上流をモックへ向けるときはここを変える。
+
+注意点:
+
+- **kmoni はすべて平文 HTTP (TLS 無し)**。ブラウザから直接叩くと混在コンテンツに
+  なるため、サーバー経由に一本化してある。
+- **P2P の WebSocket は IP あたり 2 本まで** (2026年6月〜)。サーバーが 1 本だけ張り、
+  クライアントへは自前 WebSocket でファンアウトする。上流 WS をプロキシで
+  素通しする構成は、全クライアントがサーバー IP 発になるため即座に制限へ抵触する。
+- **外部への通信量はクライアント数に依存しない**。平常時でおよそ 8.5KB/s
+  (画像 7.9KB + EEW JSON 0.5KB 前後) ≒ 1 日 700MB 程度。
+  抑えたい場合は `KMONI_IDLE_FRAME_INTERVAL_MS=2000` で半分になる。
+
+### クライアント → サーバー
+
+クライアント (Pi4 の Chromium) が話す相手は**このコンテナだけ**。
+リバースプロキシで https/wss を終端し、プロキシ↔コンテナ間は平文で構わない。
+
+| パス | プロトコル | 用途 |
+|---|---|---|
+| `GET /` | HTTP(S) | パネル本体 (HTML / JS / CSS) |
+| `GET /assets/japan-map.json` | HTTP(S) | 自前の背景地図。起動時 1 回のみ (約 134KB) |
+| `GET /ws` | **WebSocket** (`ws://` / `wss://`) | イベント配信。新フレーム通知・EEW・地震情報・津波・死活 |
+| `GET /kmoni/latest.gif` | HTTP(S) | 最新のリアルタイム震度画像 (`no-store`) |
+| `GET /kmoni/frame/{ts}.gif` | HTTP(S) | タイムスタンプ指定。内容不変なのでキャッシュ可 |
+| `GET /kmoni/pswave/{ts}.gif` | HTTP(S) | 予測円 (EEW 発表中のみ) |
+| `GET /kmoni/estshindo/{ts}.gif` | HTTP(S) | 予想震度 (EEW 発表中のみ) |
+| `GET /api/state` | HTTP(S) | 現況一括 (JSON)。デバッグ用 |
+| `GET /healthz` | HTTP(S) | 死活。劣化モードでも P2P が生きていれば 200 |
+
+画像は WebSocket にバイナリを流さず HTTP で取りに行く方式にしている
+(キャッシュ制御とデバッグが単純になるため)。流れは
+**「WS で新フレームのタイムスタンプを通知 → クライアントが HTTP で取得」**。
+
+### WebSocket プロトコルの中身
+
+型定義は `shared/src/protocol.ts` にあり、サーバーとクライアントで共有している。
+
+| 向き | メッセージ | 意味 |
+|---|---|---|
+| S→C | `hello` | 接続直後の現況一括 (以後の差分の基準) |
+| S→C | `frame` | kmoni の新フレームが取れた。タイムスタンプと遅延を通知 |
+| S→C | `eew` | EEW の新規・続報。`null` は表示終了 |
+| S→C | `eewDetection` | 緊急地震速報の発表検出 (詳細不明の第一報) |
+| S→C | `quake` | 地震情報 (震度速報・震源情報など) |
+| S→C | `tsunami` | 津波予報 |
+| S→C | `health` | 取得系の死活変化 (劣化モードの出入り) |
+| S→C | `pong` | アプリ層 ping への応答 |
+| C→S | `ping` | アプリ層ハートビート (20 秒ごと) |
+| C→S | `resync` | 取りこぼし時などに現況一括を要求 |
+
+切断対策は 3 段構えにしてある。プロキシのアイドルタイムアウト対策として
+サーバーから 30 秒ごとに WebSocket の ping フレームを送り (`WS_HEARTBEAT_MS`)、
+クライアントからも 20 秒ごとにアプリ層 ping を送る。さらに、TCP は生きているのに
+何も流れてこない状態を検知するため、クライアント側で 75 秒受信が途切れたら
+自分から張り直す (劣化モード中はフレーム通知が止まって無通信になりうるため)。
+再接続は指数バックオフ (1 秒 → 最大 30 秒)。
+
+### 開発・保守時にだけ使う外部接続
+
+常時稼働には不要。スクリプトを手で流したときだけ発生する。
+
+| 宛先 | いつ | 用途 |
+|---|---|---|
+| `https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson` | `scripts/build-basemap.mjs` 実行時 | 背景地図の元データ (行政区域) |
+| `http://www.kmoni.bosai.go.jp/data/map_img/CommonImg/base_map_w.gif` | `scripts/calibrate-kmoni-map.py` 実行時 | 座標系の較正に使う基図 |
 
 ---
 
@@ -203,3 +278,7 @@ node scripts/build-basemap.mjs
 最後の 2 つは実機 (Pi4 と N150) が要るので、このリポジトリ側では未実施。
 サーバー側は画像をリングバッファ (既定 30 フレーム × 3 レイヤ) に置くだけ、
 クライアント側は `ImageBitmap` を差し替え時に必ず `close()` する作りにしてある。
+
+実機投入までにやること、実データ待ちの確認、意図的な割り切りは
+**`docs/残課題.md`** にまとめてある。Docker ビルドと nginx 設定は未検証なので、
+N150 で最初に確認すること。
