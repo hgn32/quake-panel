@@ -13,6 +13,7 @@ export class StatusBar {
   private frameLatencyMs = 0;
   private hasFrame = false;
   private manualNotice: string | null = null;
+  private noticeTimer: number | null = null;
 
   constructor(
     private readonly link: HTMLElement,
@@ -25,10 +26,19 @@ export class StatusBar {
     this.p2p.title = 'P2P地震情報からの地震情報・津波予報・緊急地震速報の受信状況';
   }
 
+  /**
+   * サーバーとの接続は、切れているときだけ出す。
+   * つながっていれば「強震モニタ 受信中」「地震情報 受信中」が動いていること
+   * 自体が接続の証拠になるので、平常時に並べる意味がない。
+   */
   setConnection(state: ConnectionState): void {
     this.connection = state;
-    const label = state === 'open' ? '接続中' : state === 'connecting' ? '接続試行中' : '切断';
-    setChip(this.link, 'サーバー', label, state === 'open' ? 'ok' : state === 'connecting' ? 'warn' : 'bad');
+    if (state === 'open') {
+      this.link.hidden = true;
+    } else {
+      this.link.hidden = false;
+      setChip(this.link, 'サーバー', state === 'connecting' ? '接続試行中' : '切断', state === 'connecting' ? 'warn' : 'bad');
+    }
     this.renderNotice();
   }
 
@@ -73,6 +83,16 @@ export class StatusBar {
     this.renderNotice();
   }
 
+  /** 操作の結果を数秒だけ出す (保存できたことを画面で分かるように) */
+  flashNotice(message: string, durationMs = 2500): void {
+    this.setNotice(message);
+    if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer);
+    this.noticeTimer = window.setTimeout(() => {
+      this.noticeTimer = null;
+      this.setNotice(null);
+    }, durationMs);
+  }
+
   /** 接続断のほうが重い異常なので、劣化モードの案内より優先して出す。 */
   private renderNotice(): void {
     let message: string | null = this.manualNotice;
@@ -84,6 +104,7 @@ export class StatusBar {
     }
     if (message) {
       this.notice.textContent = message;
+      this.notice.classList.toggle('map-notice--info', message === this.manualNotice);
       this.notice.hidden = false;
     } else {
       this.notice.hidden = true;

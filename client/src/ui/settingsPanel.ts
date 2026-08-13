@@ -1,11 +1,23 @@
 import type { Settings, UrlKey } from '../settings.js';
 import { h, replaceChildren } from './dom.js';
 
+/** 津波予報区を手で選ぶときの選択肢。予報区名は県名を含むものが多いので県で選ばせる。 */
+const PREFECTURES = [
+  '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
+  '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
+  '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
+  '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
+  '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
+  '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
+  '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+];
+
 export interface SettingsPanelDeps {
   modal: HTMLElement;
   form: HTMLElement;
   openButton: HTMLElement;
   closeButton: HTMLElement;
+  cancelButton: HTMLElement;
   getSettings: () => Settings;
   /** URL で固定されている項目は編集させない */
   isFixedByUrl: (key: UrlKey) => boolean;
@@ -14,32 +26,54 @@ export interface SettingsPanelDeps {
   onTest: () => void;
   /** 地図をクリックして利用地を選ぶモードに入る */
   onPickHome: () => void;
-  /** 表示位置を決まった位置へ戻す */
-  onResetView: (preset: 'japan' | 'home') => void;
+  /** 自動設定のときに、いま効いている予報区を見せるために使う */
+  describeTsunamiAreas: () => string;
 }
 
 /**
  * 端末ごとの設定 UI。
+ *
+ * 変更はその場で効く (音量やテストは効かせないと確認できない)。
+ * ただし開いた時点の値を控えておき、「取消」で元へ戻せるようにしてある。
  * ここで決めるのは「この端末での鳴らし方・見せ方」だけで、サーバーの挙動は変えない (§3)。
  */
 export class SettingsPanel {
+  private snapshot: Settings | null = null;
+
   constructor(private readonly deps: SettingsPanelDeps) {
     deps.openButton.addEventListener('click', () => this.open());
-    deps.closeButton.addEventListener('click', () => this.close());
+    deps.closeButton.addEventListener('click', () => this.save());
+    deps.cancelButton.addEventListener('click', () => this.cancel());
     deps.modal.addEventListener('click', (ev) => {
-      if (ev.target === deps.modal) this.close();
+      if (ev.target === deps.modal) this.cancel();
     });
     document.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape') this.close();
+      if (ev.key === 'Escape' && !deps.modal.hidden) this.cancel();
     });
   }
 
   open(): void {
+    this.snapshot = { ...this.deps.getSettings() };
     this.render();
     this.deps.modal.hidden = false;
   }
 
+  /** 変更はすでに効いているので、閉じるだけ */
+  private save(): void {
+    this.snapshot = null;
+    this.deps.modal.hidden = true;
+  }
+
+  /** 開いた時点の値へ戻して閉じる */
+  private cancel(): void {
+    if (this.snapshot) this.deps.onChange(this.snapshot);
+    this.snapshot = null;
+    this.deps.modal.hidden = true;
+  }
+
+  /** 明滅を見せるためにいったん閉じる (取消扱いにはしない) */
   close(): void {
+    this.snapshot = null;
     this.deps.modal.hidden = true;
   }
 
@@ -74,10 +108,9 @@ export class SettingsPanel {
       ),
       this.homeRow(settings),
       this.tsunamiRow(settings),
-      this.viewRow(settings),
       this.checkboxRow(
         '表示位置を固定',
-        'ホイールでの拡大縮小とドラッグでのスクロールを受け付けなくします。常時表示の端末で誤って動かさないため。',
+        '地図のホイール操作とドラッグを受け付けなくします。常時表示の端末で誤って動かさないため。',
         settings.locked,
         (checked) => this.deps.onChange({ locked: checked }),
       ),
@@ -86,12 +119,6 @@ export class SettingsPanel {
         '拡大時の粗さが目立たなくなります。動作が重い場合は切ってください。',
         settings.glow,
         (checked) => this.deps.onChange({ glow: checked }),
-      ),
-      this.checkboxRow(
-        '配信画像の見出しを隠す',
-        '強震モニタ画像の左上に焼き込まれた英字の見出しを描画しません (観測点は含まれない領域です)。',
-        settings.hideCaption,
-        (checked) => this.deps.onChange({ hideCaption: checked }),
       ),
       this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
         this.deps.onChange({ historyCount: value }),
@@ -112,7 +139,7 @@ export class SettingsPanel {
       this.close();
       this.deps.onPickHome();
     });
-    if (fixed) pick.disabled = true;
+    pick.disabled = fixed;
     return this.row(
       '利用地',
       fixed
@@ -128,45 +155,63 @@ export class SettingsPanel {
     );
   }
 
-  /** 津波予報区。カンマ区切りで持つ (予報区名は都道府県名とは限らない)。 */
+  /**
+   * 津波予報区。
+   *
+   * 既定は利用地の都道府県から決める (予報区名は「宮崎県」「東京湾内湾」のように
+   * 県名と一致しないものもあるため、県ごとの補助表を使う)。
+   * 手動にすると県を複数選べる。
+   */
   private tsunamiRow(settings: Settings): HTMLElement {
     const fixed = this.deps.isFixedByUrl('tsunamiAreas');
-    const input = h('input', { type: 'text', class: 'settings__text' });
-    input.value = settings.tsunamiAreas.join(', ');
-    input.disabled = fixed;
-    input.addEventListener('change', () => {
-      const areas = input.value
-        .split(',')
-        .map((item) => item.trim())
-        .filter((item) => item !== '');
-      this.deps.onChange({ tsunamiAreas: areas });
-    });
-    return this.row(
-      '強調する津波予報区',
-      fixed
-        ? 'URL で指定されているため変更できません。'
-        : 'カンマ区切り。津波予報でこの予報区が対象になったとき強調します (例: 東京都, 千葉県)。',
-      input,
-    );
-  }
+    const auto = settings.tsunamiMode === 'auto' && !fixed;
 
-  /** 表示位置。ふだんは地図を直接動かすので、ここには戻す手段だけ置く。 */
-  private viewRow(settings: Settings): HTMLElement {
-    return this.row(
-      '地図の表示位置',
-      `地図はホイールで拡大縮小、ドラッグでスクロールできます (現在 ${settings.view.zoom.toFixed(1)}倍)。`,
+    const select = h('select', { class: 'settings__select', multiple: 'multiple' });
+    for (const name of PREFECTURES) {
+      const option = h('option', { value: name, text: name });
+      option.selected = settings.tsunamiAreas.some((area) => area.includes(name) || name.includes(area));
+      select.append(option);
+    }
+    select.disabled = auto || fixed;
+    const hint = h('span', { class: 'settings__hint' });
+    const renderHint = (): void => {
+      hint.textContent = fixed
+        ? 'URL で指定されているため変更できません。'
+        : `いま強調する予報区: ${this.deps.describeTsunamiAreas()}`;
+    };
+    select.addEventListener('change', () => {
+      const areas = [...select.selectedOptions].map((option) => option.value);
+      this.deps.onChange({ tsunamiAreas: areas });
+      // 選び直した結果をその場で見せる (再描画すると選択操作を邪魔するため文言だけ差し替える)
+      renderHint();
+    });
+
+    const mode = this.radioGroup(
+      'tsunami-mode',
+      [
+        { value: 'auto', label: '利用地から自動', checked: auto },
+        { value: 'manual', label: '自分で選ぶ', checked: !auto },
+      ],
+      (value) => {
+        this.deps.onChange({ tsunamiMode: value === 'auto' ? 'auto' : 'manual' });
+        this.render();
+      },
+    );
+    if (fixed) {
+      for (const input of mode.querySelectorAll('input')) input.disabled = true;
+    }
+
+    renderHint();
+    return h(
+      'div',
+      { class: 'settings__row' },
       h(
         'div',
-        { class: 'settings__options' },
-        this.button('日本全体', () => {
-          this.deps.onResetView('japan');
-          this.render();
-        }),
-        this.button('利用地周辺', () => {
-          this.deps.onResetView('home');
-          this.render();
-        }),
+        { class: 'settings__label' },
+        h('span', { text: '強調する津波予報区' }),
+        hint,
       ),
+      h('div', { class: 'settings__stack' }, mode, select),
     );
   }
 
@@ -203,14 +248,12 @@ export class SettingsPanel {
     return button;
   }
 
-  private radioRow(
-    label: string,
-    hint: string | null,
+  private radioGroup(
+    name: string,
     options: Array<{ value: string; label: string; checked: boolean }>,
     onSelect: (value: string) => void,
   ): HTMLElement {
-    const name = `radio-${label}`;
-    const group = h(
+    return h(
       'div',
       { class: 'settings__options' },
       ...options.map((option) => {
@@ -222,7 +265,15 @@ export class SettingsPanel {
         return h('label', { class: 'settings__option' }, input, h('span', { text: option.label }));
       }),
     );
-    return this.row(label, hint, group);
+  }
+
+  private radioRow(
+    label: string,
+    hint: string | null,
+    options: Array<{ value: string; label: string; checked: boolean }>,
+    onSelect: (value: string) => void,
+  ): HTMLElement {
+    return this.row(label, hint, this.radioGroup(`radio-${label}`, options, onSelect));
   }
 
   private checkboxRow(

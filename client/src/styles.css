@@ -156,7 +156,8 @@ body.cursor-hidden * {
 
 .main {
   display: grid;
-  grid-template-columns: 1fr minmax(380px, 30%);
+  /* 右側は幅固定。画面が広いときに履歴だけ間延びしても読みやすくならない。 */
+  grid-template-columns: 1fr 420px;
   min-height: 0;
 }
 
@@ -646,7 +647,8 @@ body.cursor-hidden * {
 
 .settings__row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  /* 説明文が縦長に潰れないよう、ラベル側に下限を持たせる */
+  grid-template-columns: minmax(260px, 1fr) auto;
   gap: 16px;
   align-items: center;
   padding: 12px 0;
@@ -716,6 +718,38 @@ body.cursor-hidden * {
 }
 
 /* 利用地の緯度経度と、津波予報区の入力 */
+.settings input[type='text'],
+.settings input[type='number'],
+.settings select {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #142033;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.settings input[type='text']:focus,
+.settings input[type='number']:focus,
+.settings select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings input:disabled,
+.settings select:disabled,
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings select[multiple] {
+  min-width: 220px;
+  min-height: 132px;
+}
+
 .settings__coord {
   display: inline-flex;
   align-items: center;
@@ -730,4 +764,162 @@ body.cursor-hidden * {
 
 .settings__text {
   min-width: 220px;
+}
+
+/* ---------- 地図の操作 ---------- */
+
+.map-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #050810c0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 5px 8px;
+}
+
+.map-controls[hidden] {
+  display: none;
+}
+
+.map-controls__button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #142033;
+  color: var(--text);
+  border-radius: 7px;
+  min-width: 30px;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.map-controls__button--wide {
+  font-size: 12px;
+}
+
+.map-controls__button:hover {
+  border-color: var(--accent);
+}
+
+.map-controls__value {
+  min-width: 42px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 利用地を選ぶモードの案内 */
+
+.map-pick {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #10233add;
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  z-index: 3;
+}
+
+.map-pick[hidden] {
+  display: none;
+}
+
+.map-pick__value {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.button--accent {
+  background: #1d4f7a;
+  border-color: #2f7cb8;
+}
+
+/* 設定ダイアログの下部ボタン */
+
+.modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* 履歴の展開 */
+
+.quake-list__item {
+  cursor: pointer;
+}
+
+.quake-list__item:hover {
+  background: #16203150;
+}
+
+.quake-list__toggle {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.quake-list__points {
+  margin: 6px 0 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.quake-list__point {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 6px;
+  align-items: start;
+  font-size: 12px;
+}
+
+.quake-list__point-scale {
+  text-align: center;
+  border-radius: 4px;
+  font-weight: 700;
+  padding: 0 2px;
+}
+
+.quake-list__point-names {
+  color: var(--text-dim);
+  /* 観測点は多いので、1 行に収めず折り返して全部読めるようにする
+     (パネルの高さを超えたぶんは履歴ごとスクロールする) */
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.quake-list__note {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* 操作の案内は異常の告知と見分けが付くようにする */
+.map-notice--info {
+  background: #10233add;
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.settings__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
 }
