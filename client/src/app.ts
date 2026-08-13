@@ -105,7 +105,7 @@ export class App {
     );
     this.eewPanel = new EewPanel(requireElement('eew-panel'));
     this.tsunamiPanel = new TsunamiPanel(requireElement('tsunami-panel'));
-    this.quakeList = new QuakeList(requireElement('quake-list'), []);
+    this.quakeList = new QuakeList(requireElement('quake-list'));
     this.settingsPanel = new SettingsPanel({
       modal: requireElement('settings'),
       form: requireElement('settings-form'),
@@ -136,7 +136,6 @@ export class App {
     this.setupCursorAutoHide();
     this.setupMapControls();
     await this.mapView.init();
-    this.refreshHomeHints();
     this.connection.start();
 
     // タブが再表示されたときは取りこぼしを疑って現況を取り直す
@@ -240,7 +239,6 @@ export class App {
     this.updateMapControls();
     const homeMoved =
       before.home.lat !== this.settings.home.lat || before.home.lon !== this.settings.home.lon;
-    if (homeMoved) this.refreshHomeHints();
     if (homeMoved || before.tsunamiAreas !== this.settings.tsunamiAreas ||
         before.tsunamiMode !== this.settings.tsunamiMode) {
       // 印の付け直し (表示中の予報にも即座に効かせる)
@@ -294,12 +292,6 @@ export class App {
     this.settings = { ...this.settings, view };
     this.updateMapControls();
     this.saveViewLater(view);
-  }
-
-  /** 利用地の県は座標から引く。地名を設定させないための遠回り。 */
-  private refreshHomeHints(): void {
-    const prefecture = this.mapView.prefectureAt(this.settings.home.lat, this.settings.home.lon);
-    this.quakeList.setHomeHints(prefecture ? [prefecture] : []);
   }
 
   /**
