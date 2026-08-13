@@ -923,3 +923,16 @@ body.cursor-hidden * {
   gap: 8px;
   align-items: flex-end;
 }
+
+/* 地図の凡例はリアルタイム震度の連続スケール (段階の凡例ではない) */
+.map-legend__bar {
+  width: 180px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid #00000060;
+}
+
+.map-legend__end {
+  font-size: 11px;
+  color: var(--text-dim);
+}
