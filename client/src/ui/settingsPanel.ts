@@ -1,4 +1,4 @@
-import type { Settings } from '../settings.js';
+import { ZOOM_RANGE, type Settings } from '../settings.js';
 import { h, replaceChildren } from './dom.js';
 
 export interface SettingsPanelDeps {
@@ -50,7 +50,13 @@ export class SettingsPanel {
         ],
         (value) => this.deps.onChange({ notifyForecast: value === 'all' }),
       ),
-      this.sliderRow('音量', settings.volume, (value) => this.deps.onChange({ volume: value })),
+      this.sliderRow(
+        '音量',
+        null,
+        { value: settings.volume, min: 0, max: 1, step: 0.05 },
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => this.deps.onChange({ volume: value }),
+      ),
       this.row(
         'テスト',
         '実際の警報と同じ音と画面明滅を数秒だけ出します。',
@@ -64,6 +70,18 @@ export class SettingsPanel {
           { value: 'home', label: '利用地周辺', checked: settings.mapMode === 'home' },
         ],
         (value) => this.deps.onChange({ mapMode: value === 'home' ? 'home' : 'japan' }),
+      ),
+      this.sliderRow(
+        '拡大',
+        '選んだ表示範囲をさらに拡大します。はみ出した分は上下左右が切れます。',
+        {
+          value: settings.zoom,
+          min: ZOOM_RANGE.min,
+          max: ZOOM_RANGE.max,
+          step: ZOOM_RANGE.step,
+        },
+        (value) => `${value.toFixed(1)}倍`,
+        (value) => this.deps.onChange({ zoom: value }),
       ),
       this.checkboxRow(
         '観測点を発光表示',
@@ -124,16 +142,27 @@ export class SettingsPanel {
     return this.row(label, hint, h('label', { class: 'settings__option' }, input));
   }
 
-  private sliderRow(label: string, value: number, onInput: (value: number) => void): HTMLElement {
-    const input = h('input', { type: 'range', min: '0', max: '1', step: '0.05' });
-    input.value = String(value);
-    const readout = h('span', { class: 'settings__readout', text: `${Math.round(value * 100)}%` });
+  private sliderRow(
+    label: string,
+    hint: string | null,
+    range: { value: number; min: number; max: number; step: number },
+    format: (value: number) => string,
+    onInput: (value: number) => void,
+  ): HTMLElement {
+    const input = h('input', {
+      type: 'range',
+      min: String(range.min),
+      max: String(range.max),
+      step: String(range.step),
+    });
+    input.value = String(range.value);
+    const readout = h('span', { class: 'settings__readout', text: format(range.value) });
     input.addEventListener('input', () => {
       const next = Number(input.value);
-      readout.textContent = `${Math.round(next * 100)}%`;
+      readout.textContent = format(next);
       onInput(next);
     });
-    return this.row(label, null, h('div', { class: 'settings__options' }, input, readout));
+    return this.row(label, hint, h('div', { class: 'settings__options' }, input, readout));
   }
 
   private numberRow(

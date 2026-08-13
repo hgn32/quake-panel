@@ -57,6 +57,7 @@ export class App {
       glow: this.settings.glow,
       hideCaption: this.settings.hideCaption,
       mode: this.settings.mapMode,
+      zoom: this.settings.zoom,
       home: this.home,
     });
     this.frames = new FrameStream((frame) => {
@@ -197,6 +198,7 @@ export class App {
       glow: this.settings.glow,
       hideCaption: this.settings.hideCaption,
       mode: this.settings.mapMode,
+      zoom: this.settings.zoom,
     });
     this.refreshFlash();
     this.renderQuakes();

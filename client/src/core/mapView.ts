@@ -16,6 +16,8 @@ export interface MapViewOptions {
   /** 配信画像に焼き込まれた見出し帯を描かない (§KMONI_CAPTION_BOX の説明を参照) */
   hideCaption: boolean;
   mode: ViewMode;
+  /** 表示範囲をさらに拡大する倍率 (1 = そのまま) */
+  zoom: number;
   home: { lat: number; lon: number };
 }
 
@@ -137,10 +139,11 @@ export class MapView {
   }
 
   private computeTransform(width: number, height: number): Transform {
-    const view =
+    const base =
       this.options.mode === 'home'
         ? homeViewport(this.options.home)
         : { x: 0, y: 0, width: KMONI_MAP.width, height: KMONI_MAP.height };
+    const view = zoomViewport(base, this.options.zoom);
     const scale = Math.min(width / view.width, height / view.height);
     return {
       scale,
@@ -335,6 +338,27 @@ function homeViewport(home: { lat: number; lon: number }): {
   return {
     x: clamp(center.x - width / 2, 0, KMONI_MAP.width - width),
     y: clamp(center.y - height / 2, 0, KMONI_MAP.height - height),
+    width,
+    height,
+  };
+}
+
+/**
+ * 表示範囲を中心はそのままに狭めて、拡大したように見せる。
+ * 画像の外まで寄せても意味が無いので、狭めた矩形は画像内へ収める。
+ */
+function zoomViewport(
+  view: { x: number; y: number; width: number; height: number },
+  zoom: number,
+): { x: number; y: number; width: number; height: number } {
+  if (!Number.isFinite(zoom) || zoom <= 1) return view;
+  const width = view.width / zoom;
+  const height = view.height / zoom;
+  const centerX = view.x + view.width / 2;
+  const centerY = view.y + view.height / 2;
+  return {
+    x: clamp(centerX - width / 2, 0, KMONI_MAP.width - width),
+    y: clamp(centerY - height / 2, 0, KMONI_MAP.height - height),
     width,
     height,
   };

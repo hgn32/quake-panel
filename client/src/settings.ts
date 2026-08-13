@@ -15,9 +15,14 @@ export interface Settings {
   /** 配信画像に焼き込まれた見出し帯を表示しない */
   hideCaption: boolean;
   mapMode: ViewMode;
+  /** 表示範囲をさらに拡大する倍率 (1 = そのまま) */
+  zoom: number;
   /** 履歴に表示する件数 */
   historyCount: number;
 }
+
+/** 拡大の下限・上限。1 未満は letterbox が増えるだけなので許さない。 */
+export const ZOOM_RANGE = { min: 1, max: 4, step: 0.1 } as const;
 
 const STORAGE_KEY = 'quake-panel.settings.v1';
 
@@ -27,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   glow: true,
   hideCaption: true,
   mapMode: 'japan',
+  zoom: 1,
   historyCount: 6,
 };
 
@@ -41,6 +47,7 @@ export function loadSettings(): Settings {
       glow: parsed.glow ?? DEFAULT_SETTINGS.glow,
       hideCaption: parsed.hideCaption ?? DEFAULT_SETTINGS.hideCaption,
       mapMode: parsed.mapMode === 'home' ? 'home' : 'japan',
+      zoom: clamp(parsed.zoom ?? DEFAULT_SETTINGS.zoom, ZOOM_RANGE.min, ZOOM_RANGE.max),
       historyCount: clamp(parsed.historyCount ?? DEFAULT_SETTINGS.historyCount, 3, 12),
     };
   } catch {
