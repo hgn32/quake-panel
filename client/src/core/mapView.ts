@@ -463,13 +463,14 @@ export class MapView {
    * 配信画像では観測点が 3x3 px の四角で描かれている。画像のまま拡大すると
    * 四角も一緒に大きくなり、拡大するほど地図が四角で埋まってしまう
    * (本家の強震モニタは倍率によらず一定の大きさで描いている)。
-   * そこで四角の中心だけを拾い、描画側で画面上の大きさを決める。
+   * そこで観測点の位置だけを拾い、画面上の大きさは描画側で決める。
    *
-   * 中心は「上下左右が埋まっている画素」で取れる (3x3 ならちょうど中心 1 点)。
-   * 2x2 以下の小さな四角は中心が取れないので、近くに中心が無い画素は
-   * それ自体を中心として拾う (取りこぼすと観測点が消えてしまう)。
+   * 密集地では隣り合う四角がくっついて 1 つの大きな塊になる (実測で最大
+   * 1264 px = 100 点以上が地続き)。塊の内側を無条件に拾うと、ありもしない
+   * 観測点が線状に並んでしまうため、塊ごとに 3px 間隔の格子で拾い直す。
+   * 3px は四角の一辺で、隣り合う観測点の最小間隔でもある。
    *
-   * 毎秒動くので、全画素を見る走査は 1 回だけにしてある。
+   * 毎秒動く処理なので、全画素を見る走査は 1 回だけにしてある。
    */
   private extractPoints(bitmap: ImageBitmap): Map<string, number[]> {
     if (this.pointsFor === bitmap && this.points) return this.points;
@@ -485,10 +486,10 @@ export class MapView {
     ctx.drawImage(bitmap, 0, 0);
     const src = ctx.getImageData(0, 0, width, height).data;
 
-    // 毎秒走らせるので、全画素を舐めるのは 1 回だけにして、
-    // あとは色の付いている画素 (全体の数%) だけを相手にする。
-    const opaque: number[] = [];
+    // 色の付いている画素を集める (全画素を見るのはここだけ)
+    const filled = new Uint8Array(width * height);
     const cap = KMONI_CAPTION_BOX;
+    const opaque: number[] = [];
     for (let y = 1; y < height - 1; y += 1) {
       const row = y * width;
       const inCaptionRow = y < cap.height;
@@ -496,40 +497,86 @@ export class MapView {
         if (src[(row + x) * 4 + 3] === 0) continue;
         // 左上の見出し帯 (英字と時刻) は観測点ではない
         if (inCaptionRow && x < cap.width) continue;
+        filled[row + x] = 1;
         opaque.push(row + x);
       }
     }
 
-    const core = new Uint8Array(width * height);
-    const covered = new Uint8Array(width * height);
-    for (const index of opaque) {
-      const i = index * 4 + 3;
-      if (src[i - 4] === 0 || src[i + 4] === 0) continue;
-      if (src[i - width * 4] === 0 || src[i + width * 4] === 0) continue;
-      core[index] = 1;
-      // 中心の周り 1 画素は「中心が近くにある」印を付ける
-      for (let dy = -1; dy <= 1; dy += 1) {
-        for (let dx = -1; dx <= 1; dx += 1) {
-          covered[index + dy * width + dx] = 1;
+    const visited = new Uint8Array(width * height);
+    const stack: number[] = [];
+    const cells: number[] = [];
+    const add = (index: number): void => {
+      const color = this.pointColor(src, index);
+      const list = points.get(color) ?? [];
+      list.push((index % width) + 0.5, Math.floor(index / width) + 0.5);
+      points.set(color, list);
+    };
+
+    for (const seed of opaque) {
+      if (visited[seed] === 1) continue;
+      // ひとつながりの塊を集める
+      cells.length = 0;
+      stack.length = 0;
+      stack.push(seed);
+      visited[seed] = 1;
+      let minX = width;
+      let minY = height;
+      while (stack.length > 0) {
+        const index = stack.pop() as number;
+        cells.push(index);
+        const x = index % width;
+        const y = (index - x) / width;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        // 上下は端の判定だけ、左右は行をまたがないことも見る
+        if (x + 1 < width && filled[index + 1] === 1 && visited[index + 1] === 0) {
+          visited[index + 1] = 1;
+          stack.push(index + 1);
+        }
+        if (x > 0 && filled[index - 1] === 1 && visited[index - 1] === 0) {
+          visited[index - 1] = 1;
+          stack.push(index - 1);
+        }
+        const down = index + width;
+        if (down < filled.length && filled[down] === 1 && visited[down] === 0) {
+          visited[down] = 1;
+          stack.push(down);
+        }
+        const up = index - width;
+        if (up >= 0 && filled[up] === 1 && visited[up] === 0) {
+          visited[up] = 1;
+          stack.push(up);
         }
       }
-    }
 
-    for (const index of opaque) {
-      // 中心そのものか、近くに中心が無い画素 (2x2 以下の小さな四角) だけ拾う
-      if (core[index] !== 1 && covered[index] === 1) continue;
-      const i = index * 4;
-      // 平常時の色 (濃い青) は黒い背景の上だと重く沈むので、暗い色ほど
-      // 白へ寄せて明るくする。色相は変えない (強い揺れの黄〜赤はほぼそのまま)。
-      const [r, g, b] = liftPointColor(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0);
-      const key = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
-      const list = points.get(key) ?? [];
-      list.push((index % width) + 0.5, Math.floor(index / width) + 0.5);
-      points.set(key, list);
+      // 塊の左上を基準に 3px 間隔で拾う (1 つの四角からは 1 点だけ出る)
+      let found = 0;
+      for (const index of cells) {
+        const x = index % width;
+        const y = (index - x) / width;
+        if ((x - minX) % 3 !== 1 || (y - minY) % 3 !== 1) continue;
+        add(index);
+        found += 1;
+      }
+      if (found === 0) {
+        // 2x2 以下の小さな四角は格子に乗らない。中心を 1 点だけ置く。
+        add(cells[Math.floor(cells.length / 2)] as number);
+      }
     }
     this.points = points;
     this.pointsFor = bitmap;
     return points;
+  }
+
+  /**
+   * 観測点の色。
+   * 平常時の色 (濃い青) は黒い背景の上だと重く沈むので、暗い色ほど白へ寄せて
+   * 明るくする。色相は変えない (強い揺れの黄〜赤はほぼそのまま)。
+   */
+  private pointColor(src: Uint8ClampedArray, index: number): string {
+    const i = index * 4;
+    const [r, g, b] = liftPointColor(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0);
+    return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
   }
 
   /**
