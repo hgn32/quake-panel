@@ -161,7 +161,6 @@ export class Hub extends EventEmitter {
       eew: this.eew,
       quakes: this.quakes,
       tsunami: this.tsunami,
-      home: this.config.home,
     };
   }
 

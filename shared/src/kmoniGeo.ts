@@ -77,6 +77,25 @@ export function pixelToLatLon(x: number, y: number): { lat: number; lon: number 
   };
 }
 
+/**
+ * ピクセル座標 → 緯度経度 (本土・インセットを指定して逆変換する)。
+ *
+ * `projectToPixel` の逆。ピクセルだけからは本土かインセットかを決められない
+ * (インセットが描かれている領域は、本土側の変換だと日本海の上になる) ため、
+ * どちらとして戻すかは呼び出し側が決める。画面から拾うときは、その位置に
+ * 沖縄県の多角形があるかどうかで判断できる。
+ */
+export function unprojectFromPixel(
+  x: number,
+  y: number,
+  options?: { inset?: boolean },
+): { lat: number; lon: number } {
+  if (options?.inset) {
+    return pixelToLatLon(x - KMONI_INSET.offsetX, y - KMONI_INSET.offsetY);
+  }
+  return pixelToLatLon(x, y);
+}
+
 /** 配信画像の描画範囲に収まるか */
 export function isInsideMap(lat: number, lon: number): boolean {
   const p = latLonToPixel(lat, lon);

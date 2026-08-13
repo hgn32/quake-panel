@@ -2,23 +2,48 @@ import {
   KMONI_CAPTION_BOX,
   KMONI_MAP,
   projectToPixel,
+  unprojectFromPixel,
   type EewState,
   type TsunamiInfo,
 } from '@quake-panel/shared';
 import { Basemap, DARK_THEME } from './basemap.js';
 import type { FrameImages } from './frameStream.js';
 
-export type ViewMode = 'japan' | 'home';
+/**
+ * 地図の表示位置。中心は配信画像のピクセル座標で持つ。
+ * 画面の大きさに依らないので、そのまま保存・復元できる。
+ */
+export interface MapViewState {
+  centerX: number;
+  centerY: number;
+  /** 画像全体が画面に収まる倍率を 1 とした拡大率 */
+  zoom: number;
+}
+
+/** 拡大率の範囲。1 未満は余白が増えるだけなので許さない。 */
+export const ZOOM_RANGE = { min: 1, max: 8 } as const;
 
 export interface MapViewOptions {
   /** 観測点の発光表現。Pi4 で重い場合に切れるようにしておく。 */
   glow: boolean;
   /** 配信画像に焼き込まれた見出し帯を描かない (§KMONI_CAPTION_BOX の説明を参照) */
   hideCaption: boolean;
-  mode: ViewMode;
-  /** 表示範囲をさらに拡大する倍率 (1 = そのまま) */
-  zoom: number;
+  /** 表示位置。ホイールとドラッグで動く */
+  view: MapViewState;
+  /** false ならホイールもドラッグも受け付けない (キオスク運用) */
+  interactive: boolean;
   home: { lat: number; lon: number };
+}
+
+/** 日本全体を写す表示 */
+export function fullMapView(): MapViewState {
+  return { centerX: KMONI_MAP.width / 2, centerY: KMONI_MAP.height / 2, zoom: 1 };
+}
+
+/** 利用地の周辺を写す表示 */
+export function homeMapView(home: { lat: number; lon: number }): MapViewState {
+  const p = projectToPixel(home.lat, home.lon);
+  return { centerX: p.x, centerY: p.y, zoom: 2.4 };
 }
 
 interface Transform {
@@ -45,14 +70,19 @@ export class MapView {
   private animationHandle: number | null = null;
   private animating = false;
   private resizeObserver: ResizeObserver | null = null;
+  private drag: { pointerId: number; x: number; y: number; moved: number } | null = null;
+  private pick: ((location: { lat: number; lon: number }) => void) | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private options: MapViewOptions,
+    /** ホイール・ドラッグで表示位置が動いたときに呼ばれる (保存はアプリ側) */
+    private readonly onViewChange?: (view: MapViewState) => void,
   ) {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('2D コンテキストを取得できませんでした');
     this.ctx = ctx;
+    this.attachInteraction();
   }
 
   async init(): Promise<void> {
@@ -75,7 +105,170 @@ export class MapView {
     return this.basemap.prefectureAtPixel(p.x, p.y);
   }
 
+
+  /**
+   * ホイールで拡大縮小、ドラッグでスクロール。
+   *
+   * キオスクでは触られたくないので `interactive` で止められる。止めている間も
+   * イベントは購読したままにして、設定を切り替えた瞬間から効くようにする。
+   */
+  private attachInteraction(): void {
+    // ページ全体のスクロールに持っていかれないよう passive を外す
+    this.canvas.addEventListener('wheel', this.handleWheel, { passive: false });
+    this.canvas.addEventListener('pointerdown', this.handlePointerDown);
+    this.canvas.addEventListener('pointermove', this.handlePointerMove);
+    this.canvas.addEventListener('pointerup', this.handlePointerUp);
+    this.canvas.addEventListener('pointercancel', this.handlePointerUp);
+    this.canvas.addEventListener('contextmenu', this.handleContextMenu);
+  }
+
+  private detachInteraction(): void {
+    this.canvas.removeEventListener('wheel', this.handleWheel);
+    this.canvas.removeEventListener('pointerdown', this.handlePointerDown);
+    this.canvas.removeEventListener('pointermove', this.handlePointerMove);
+    this.canvas.removeEventListener('pointerup', this.handlePointerUp);
+    this.canvas.removeEventListener('pointercancel', this.handlePointerUp);
+    this.canvas.removeEventListener('contextmenu', this.handleContextMenu);
+  }
+
+  /**
+   * 利用地を地図から選ぶモードに入る。
+   * 次のクリック位置を緯度経度に直して返す。ドラッグでのスクロールは効いたまま。
+   */
+  startPick(onPick: (location: { lat: number; lon: number }) => void): void {
+    this.pick = onPick;
+    this.canvas.style.cursor = 'crosshair';
+  }
+
+  cancelPick(): void {
+    this.pick = null;
+    this.canvas.style.cursor = '';
+  }
+
+  get isPicking(): boolean {
+    return this.pick !== null;
+  }
+
+  private readonly handleWheel = (ev: WheelEvent): void => {
+    if (!this.options.interactive) return;
+    ev.preventDefault();
+    // 1 ノッチで約 1.1 倍。トラックパッドの細かい値でも同じ感覚になるよう指数で扱う。
+    const factor = Math.exp(-ev.deltaY * 0.0015);
+    this.zoomAt(ev.clientX, ev.clientY, factor);
+  };
+
+  private readonly handlePointerDown = (ev: PointerEvent): void => {
+    if (ev.button !== 0) return;
+    this.drag = { pointerId: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: 0 };
+    this.canvas.setPointerCapture(ev.pointerId);
+  };
+
+  private readonly handlePointerMove = (ev: PointerEvent): void => {
+    const drag = this.drag;
+    if (!drag || drag.pointerId !== ev.pointerId) return;
+    const dx = ev.clientX - drag.x;
+    const dy = ev.clientY - drag.y;
+    drag.x = ev.clientX;
+    drag.y = ev.clientY;
+    drag.moved += Math.abs(dx) + Math.abs(dy);
+    if (!this.options.interactive) return;
+    this.panBy(dx, dy);
+  };
+
+  private readonly handlePointerUp = (ev: PointerEvent): void => {
+    const drag = this.drag;
+    if (!drag || drag.pointerId !== ev.pointerId) return;
+    this.drag = null;
+    if (this.canvas.hasPointerCapture(ev.pointerId)) {
+      this.canvas.releasePointerCapture(ev.pointerId);
+    }
+    // 動かさずに離したときだけ「クリック」とみなす (スクロールと区別する)
+    if (drag.moved > 4 || !this.pick) return;
+    const picked = this.locationAt(ev.clientX, ev.clientY);
+    const onPick = this.pick;
+    this.cancelPick();
+    onPick(picked);
+  };
+
+  /** ドラッグ中に出る選択メニューを抑える */
+  private readonly handleContextMenu = (ev: MouseEvent): void => {
+    if (this.options.interactive) ev.preventDefault();
+  };
+
+  /** 画面上の一点を動かさずに拡大縮小する */
+  private zoomAt(clientX: number, clientY: number, factor: number): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const before = this.toMapPixel(x, y);
+    const zoom = clampValue(
+      this.options.view.zoom * factor,
+      ZOOM_RANGE.min,
+      ZOOM_RANGE.max,
+    );
+    if (zoom === this.options.view.zoom) return;
+    const scale = this.fitScale(this.cssSize.width, this.cssSize.height) * zoom;
+    // カーソル下の点が動かないように中心を決め直す
+    this.commitView({
+      centerX: before.x + (this.cssSize.width / 2 - x) / scale,
+      centerY: before.y + (this.cssSize.height / 2 - y) / scale,
+      zoom,
+    });
+  }
+
+  private panBy(dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return;
+    this.commitView({
+      ...this.options.view,
+      centerX: this.options.view.centerX - dx / this.transform.scale,
+      centerY: this.options.view.centerY - dy / this.transform.scale,
+    });
+  }
+
+  /** 画面座標 → 配信画像のピクセル座標 */
+  private toMapPixel(x: number, y: number): { x: number; y: number } {
+    return {
+      x: (x - this.transform.offsetX) / this.transform.scale,
+      y: (y - this.transform.offsetY) / this.transform.scale,
+    };
+  }
+
+  /**
+   * 画面座標 → 緯度経度。
+   *
+   * 南西諸島は画像左上の別枠 (インセット) に描かれていて、ピクセルだけでは
+   * どちらの変換か決まらない。その位置に沖縄県の多角形があるかどうかで判断する。
+   */
+  private locationAt(clientX: number, clientY: number): { lat: number; lon: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const p = this.toMapPixel(clientX - rect.left, clientY - rect.top);
+    const inset = this.basemap.prefectureAtPixel(p.x, p.y) === '沖縄県';
+    return unprojectFromPixel(p.x, p.y, { inset });
+  }
+
+  /** 中心は画像の中に収める。行き過ぎて真っ黒になるのを防ぐ。 */
+  private commitView(view: MapViewState): void {
+    const next: MapViewState = {
+      centerX: clampValue(view.centerX, 0, KMONI_MAP.width),
+      centerY: clampValue(view.centerY, 0, KMONI_MAP.height),
+      zoom: clampValue(view.zoom, ZOOM_RANGE.min, ZOOM_RANGE.max),
+    };
+    const current = this.options.view;
+    if (
+      next.centerX === current.centerX &&
+      next.centerY === current.centerY &&
+      next.zoom === current.zoom
+    ) {
+      return;
+    }
+    this.options = { ...this.options, view: next };
+    this.transform = this.computeTransform(this.cssSize.width, this.cssSize.height);
+    this.requestRender();
+    this.onViewChange?.(next);
+  }
+
   dispose(): void {
+    this.detachInteraction();
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.stopAnimation();
@@ -138,18 +331,22 @@ export class MapView {
     this.requestRender();
   }
 
+  /**
+   * 表示位置から描画変換を作る。
+   * 拡大率 1 は「画像全体が画面に収まる」状態で、画面の大きさが変わっても
+   * 保存してある中心と拡大率がそのまま使える。
+   */
   private computeTransform(width: number, height: number): Transform {
-    const base =
-      this.options.mode === 'home'
-        ? homeViewport(this.options.home)
-        : { x: 0, y: 0, width: KMONI_MAP.width, height: KMONI_MAP.height };
-    const view = zoomViewport(base, this.options.zoom);
-    const scale = Math.min(width / view.width, height / view.height);
+    const scale = this.fitScale(width, height) * this.options.view.zoom;
     return {
       scale,
-      offsetX: (width - view.width * scale) / 2 - view.x * scale,
-      offsetY: (height - view.height * scale) / 2 - view.y * scale,
+      offsetX: width / 2 - this.options.view.centerX * scale,
+      offsetY: height / 2 - this.options.view.centerY * scale,
     };
+  }
+
+  private fitScale(width: number, height: number): number {
+    return Math.min(width / KMONI_MAP.width, height / KMONI_MAP.height);
   }
 
   private requestRender(): void {
@@ -326,45 +523,7 @@ export class MapView {
 }
 
 /** 利用地を中心にした表示範囲 (日向灘周辺が入るくらい) */
-function homeViewport(home: { lat: number; lon: number }): {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-} {
-  const center = projectToPixel(home.lat, home.lon);
-  const width = 150;
-  const height = 170;
-  return {
-    x: clamp(center.x - width / 2, 0, KMONI_MAP.width - width),
-    y: clamp(center.y - height / 2, 0, KMONI_MAP.height - height),
-    width,
-    height,
-  };
-}
-
-/**
- * 表示範囲を中心はそのままに狭めて、拡大したように見せる。
- * 画像の外まで寄せても意味が無いので、狭めた矩形は画像内へ収める。
- */
-function zoomViewport(
-  view: { x: number; y: number; width: number; height: number },
-  zoom: number,
-): { x: number; y: number; width: number; height: number } {
-  if (!Number.isFinite(zoom) || zoom <= 1) return view;
-  const width = view.width / zoom;
-  const height = view.height / zoom;
-  const centerX = view.x + view.width / 2;
-  const centerY = view.y + view.height / 2;
-  return {
-    x: clamp(centerX - width / 2, 0, KMONI_MAP.width - width),
-    y: clamp(centerY - height / 2, 0, KMONI_MAP.height - height),
-    width,
-    height,
-  };
-}
-
-function clamp(value: number, min: number, max: number): number {
+function clampValue(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 

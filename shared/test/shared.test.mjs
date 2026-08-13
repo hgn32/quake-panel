@@ -14,6 +14,7 @@ import {
   pixelToLatLon,
   projectToPixel,
   toKmoniTimestamp,
+  unprojectFromPixel,
 } from '../dist/index.js';
 
 describe('kmoni の座標変換', () => {
@@ -108,5 +109,30 @@ describe('時刻の扱い', () => {
   it('プロセスの TZ 設定に影響されない', () => {
     // サーバーを UTC で動かしても JST 表示になること
     assert.equal(formatJstClock('2026-08-13T02:09:55.000Z'), '11:09:55');
+  });
+});
+
+describe('ピクセルから緯度経度へ戻す', () => {
+  it('本土は往復して同じ座標になる', () => {
+    for (const [lat, lon] of [
+      [35.681, 139.767],
+      [43.068, 141.351],
+      [33.59, 130.42],
+    ]) {
+      const px = projectToPixel(lat, lon);
+      const back = unprojectFromPixel(px.x, px.y);
+      assert.ok(Math.abs(back.lat - lat) < 1e-9);
+      assert.ok(Math.abs(back.lon - lon) < 1e-9);
+    }
+  });
+
+  it('南西諸島はインセットとして戻す', () => {
+    const naha = projectToPixel(26.21, 127.68);
+    const back = unprojectFromPixel(naha.x, naha.y, { inset: true });
+    assert.ok(Math.abs(back.lat - 26.21) < 1e-9);
+    assert.ok(Math.abs(back.lon - 127.68) < 1e-9);
+    // インセットと知らずに戻すと日本海の上になる (だから呼び出し側が判断する)
+    const wrong = unprojectFromPixel(naha.x, naha.y);
+    assert.ok(wrong.lat > 35);
   });
 });

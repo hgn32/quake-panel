@@ -110,10 +110,11 @@ describe('P2P 551 (地震情報)', () => {
 
 describe('P2P 552 (津波予報)', () => {
   it('利用地の予報区を判定する', () => {
-    const tsunami = parseTsunami(TSUNAMI_552, NOW, ['宮崎県']);
+    const tsunami = parseTsunami(TSUNAMI_552, NOW);
     assert.equal(tsunami.cancelled, false);
-    assert.equal(tsunami.affectsHome, true);
-    assert.equal(tsunami.areas[0].isHome, true);
+    // 利用地の印は表示側が付ける (shared/tsunami.ts)
+    assert.equal(tsunami.affectsHome, false);
+    assert.equal(tsunami.areas[0].isHome, false);
     assert.equal(tsunami.areas[0].immediate, true);
     assert.equal(tsunami.areas[0].maxHeightValue, 1);
     assert.equal(tsunami.areas[0].firstHeightCondition, '津波到達中と推測');
@@ -123,7 +124,7 @@ describe('P2P 552 (津波予報)', () => {
   });
 
   it('解除電文を解除として扱う', () => {
-    const tsunami = parseTsunami({ code: 552, id: 'z', cancelled: true, areas: [] }, NOW, ['宮崎県']);
+    const tsunami = parseTsunami({ code: 552, id: 'z', cancelled: true, areas: [] }, NOW);
     assert.equal(tsunami.cancelled, true);
     assert.equal(tsunami.affectsHome, false);
   });

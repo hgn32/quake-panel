@@ -10,14 +10,10 @@ services:
     environment:
       TZ: Asia/Tokyo
       LOG_LEVEL: info
-      # 利用地。地図の初期位置と履歴の強調に使う (地名は設定しない)。
-      HOME_LAT: '35.681'
-      HOME_LON: '139.767'
-      # 津波予報で強調する予報区
-      TSUNAMI_HOME_AREAS: 東京都
+      # 利用地・津波予報区・表示は端末ごとにパネルの「設定」で決める
       # 実測で kmoni は毎秒更新。負荷を抑えたい場合は 2000 にする。
-      KMONI_IDLE_FRAME_INTERVAL_MS: '1000'
-      KMONI_ACTIVE_FRAME_INTERVAL_MS: '1000'
+      KMONI_IDLE_FRAME_INTERVAL_SEC: '1'
+      KMONI_ACTIVE_FRAME_INTERVAL_SEC: '1'
     # 画像はメモリ上のリングバッファに置くだけなので、上限を切っておく
     mem_limit: 512m
     logging:
