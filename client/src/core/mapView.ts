@@ -81,8 +81,9 @@ export class MapView {
   private animating = false;
   private resizeObserver: ResizeObserver | null = null;
   private drag: { pointerId: number; x: number; y: number; moved: number } | null = null;
-  private shrunk: HTMLCanvasElement | null = null;
-  private shrunkFor: ImageBitmap | null = null;
+  private scratch: HTMLCanvasElement | null = null;
+  private points: Map<string, number[]> | null = null;
+  private pointsFor: ImageBitmap | null = null;
   private pick: ((location: { lat: number; lon: number }) => void) | null = null;
 
   constructor(
@@ -428,85 +429,152 @@ export class MapView {
   private drawKmoniLayers(ctx: CanvasRenderingContext2D): void {
     const frame = this.frame;
     if (!frame) return;
+
+    // 予想震度と予測円は面で描かれているので、画像のまま地図に重ねる
     ctx.save();
     ctx.translate(this.transform.offsetX, this.transform.offsetY);
     ctx.scale(this.transform.scale, this.transform.scale);
-    // 観測点は 352x400 の画像に 1〜数ピクセルの四角として描かれている。
-    // 拡大時に補間を効かせると四角の輪郭が溶けて「ぼやけた点」になるので、
-    // ここは最近傍のまま引き伸ばして角を残す。
     ctx.imageSmoothingEnabled = false;
-
     if (frame.estShindo) {
       ctx.globalAlpha = 0.75;
       this.drawLayer(ctx, frame.estShindo);
       ctx.globalAlpha = 1;
     }
+    ctx.restore();
 
-    // 観測点は 3x3 px で描かれていて、そのまま引き伸ばすと四角が大きすぎる。
-    // 2x2 に削ったものを使い、削れた半画素ぶんはずらして中心を合わせる。
-    const points = this.shrinkPoints(frame.realtime);
-    ctx.save();
-    ctx.translate(0.5, 0.5);
-    if (this.options.glow) {
-      // 観測点を少しにじませて重ねると、拡大時の粗さが目立たなくなる。
+    // 観測点は倍率によらず一定の大きさで描く (画像ごと拡大しない)
+    this.drawPoints(ctx, frame.realtime);
+
+    if (frame.psWave) {
       ctx.save();
-      ctx.filter = `blur(${(1.6 / this.transform.scale).toFixed(2)}px)`;
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.55;
-      this.drawLayer(ctx, points);
+      ctx.translate(this.transform.offsetX, this.transform.offsetY);
+      ctx.scale(this.transform.scale, this.transform.scale);
+      ctx.imageSmoothingEnabled = false;
+      this.drawLayer(ctx, frame.psWave);
       ctx.restore();
     }
-    this.drawLayer(ctx, points);
-    ctx.restore();
-
-    if (frame.psWave) this.drawLayer(ctx, frame.psWave);
-    ctx.restore();
   }
 
 
+
   /**
-   * 観測点の四角を一回り小さくしたものを作る。
+   * 観測点の位置と色を拾う。
    *
-   * 配信画像では観測点が 3x3 px で描かれていて、フル HD へ引き伸ばすと
-   * 四角が大きすぎて地図が埋まる。右と下が埋まっている画素だけを残して
-   * 2x2 にし、失われる半画素ぶんは描画時にずらして中心を合わせる。
-   * 元の画像には手を加えず、描画用の複製を作るだけ (§2(2))。
+   * 配信画像では観測点が 3x3 px の四角で描かれている。画像のまま拡大すると
+   * 四角も一緒に大きくなり、拡大するほど地図が四角で埋まってしまう
+   * (本家の強震モニタは倍率によらず一定の大きさで描いている)。
+   * そこで四角の中心だけを拾い、描画側で画面上の大きさを決める。
+   *
+   * 中心は「上下左右が埋まっている画素」で取れる (3x3 ならちょうど中心 1 点)。
+   * 2x2 以下の小さな四角は中心が取れないので、近くに中心が無い画素は
+   * それ自体を中心として拾う (取りこぼすと観測点が消えてしまう)。
+   *
+   * 毎秒動くので、全画素を見る走査は 1 回だけにしてある。
    */
-  private shrinkPoints(bitmap: ImageBitmap): CanvasImageSource {
-    if (this.shrunkFor === bitmap && this.shrunk) return this.shrunk;
+  private extractPoints(bitmap: ImageBitmap): Map<string, number[]> {
+    if (this.pointsFor === bitmap && this.points) return this.points;
     const { width, height } = KMONI_MAP;
-    const canvas = this.shrunk ?? document.createElement('canvas');
+    const canvas = this.scratch ?? document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return bitmap;
+    this.scratch = canvas;
+    const points = new Map<string, number[]>();
+    if (!ctx) return points;
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(bitmap, 0, 0);
-    const image = ctx.getImageData(0, 0, width, height);
-    const src = image.data;
-    const out = new Uint8ClampedArray(src.length);
-    for (let y = 0; y < height - 1; y += 1) {
-      for (let x = 0; x < width - 1; x += 1) {
-        const i = (y * width + x) * 4;
-        if (src[i + 3] === 0) continue;
-        // 右と下が埋まっていない画素 = 四角の右端・下端なので落とす
-        if (src[i + 7] === 0 || src[i + width * 4 + 3] === 0) continue;
-        const r = src[i] ?? 0;
-        const g = src[i + 1] ?? 0;
-        const b = src[i + 2] ?? 0;
-        // 平常時の色 (濃い青) は黒い背景の上だと重く沈む。暗い色ほど白へ寄せて
-        // 明るくする。色相は変えないので、強い揺れの色 (黄〜赤) はほぼそのまま。
-        const [lr, lg, lb] = liftPointColor(r, g, b);
-        out[i] = lr;
-        out[i + 1] = lg;
-        out[i + 2] = lb;
-        out[i + 3] = src[i + 3] ?? 0;
+    const src = ctx.getImageData(0, 0, width, height).data;
+
+    // 毎秒走らせるので、全画素を舐めるのは 1 回だけにして、
+    // あとは色の付いている画素 (全体の数%) だけを相手にする。
+    const opaque: number[] = [];
+    const cap = KMONI_CAPTION_BOX;
+    for (let y = 1; y < height - 1; y += 1) {
+      const row = y * width;
+      const inCaptionRow = y < cap.height;
+      for (let x = 1; x < width - 1; x += 1) {
+        if (src[(row + x) * 4 + 3] === 0) continue;
+        // 左上の見出し帯 (英字と時刻) は観測点ではない
+        if (inCaptionRow && x < cap.width) continue;
+        opaque.push(row + x);
       }
     }
-    ctx.putImageData(new ImageData(out, width, height), 0, 0);
-    this.shrunk = canvas;
-    this.shrunkFor = bitmap;
-    return canvas;
+
+    const core = new Uint8Array(width * height);
+    const covered = new Uint8Array(width * height);
+    for (const index of opaque) {
+      const i = index * 4 + 3;
+      if (src[i - 4] === 0 || src[i + 4] === 0) continue;
+      if (src[i - width * 4] === 0 || src[i + width * 4] === 0) continue;
+      core[index] = 1;
+      // 中心の周り 1 画素は「中心が近くにある」印を付ける
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          covered[index + dy * width + dx] = 1;
+        }
+      }
+    }
+
+    for (const index of opaque) {
+      // 中心そのものか、近くに中心が無い画素 (2x2 以下の小さな四角) だけ拾う
+      if (core[index] !== 1 && covered[index] === 1) continue;
+      const i = index * 4;
+      // 平常時の色 (濃い青) は黒い背景の上だと重く沈むので、暗い色ほど
+      // 白へ寄せて明るくする。色相は変えない (強い揺れの黄〜赤はほぼそのまま)。
+      const [r, g, b] = liftPointColor(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0);
+      const key = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+      const list = points.get(key) ?? [];
+      list.push((index % width) + 0.5, Math.floor(index / width) + 0.5);
+      points.set(key, list);
+    }
+    this.points = points;
+    this.pointsFor = bitmap;
+    return points;
+  }
+
+  /**
+   * 観測点を画面上の一定の大きさで描く。
+   *
+   * 倍率を上げても四角は大きくならない (上限を付けてある)。
+   * 画面座標で整数に丸めて描くので、拡大しても輪郭がぼやけない。
+   */
+  private drawPoints(ctx: CanvasRenderingContext2D, bitmap: ImageBitmap): void {
+    const { scale, offsetX, offsetY } = this.transform;
+    const size = Math.max(3, Math.min(Math.round(3 * scale), 8));
+    const half = size / 2;
+    const points = this.extractPoints(bitmap);
+    const { width, height } = this.cssSize;
+
+    ctx.save();
+    for (const [color, coords] of points) {
+      ctx.fillStyle = color;
+      for (let i = 0; i < coords.length; i += 2) {
+        const sx = Math.round((coords[i] ?? 0) * scale + offsetX - half);
+        const sy = Math.round((coords[i + 1] ?? 0) * scale + offsetY - half);
+        // 画面の外は描かない (拡大時はほとんどが外になる)
+        if (sx + size < 0 || sy + size < 0 || sx > width || sy > height) continue;
+        ctx.fillRect(sx, sy, size, size);
+      }
+    }
+    if (this.options.glow) {
+      // 少し大きい四角を薄く重ねて発光させる。にじませるより軽い。
+      // 日本全体を写しているときは観測点が密で、強くすると重なって白く潰れる。
+      // 拡大して疎になるほど強くする。
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(0.3, 0.02 * scale);
+      const glowSize = size + 4;
+      const glowHalf = glowSize / 2;
+      for (const [color, coords] of points) {
+        ctx.fillStyle = color;
+        for (let i = 0; i < coords.length; i += 2) {
+          const sx = Math.round((coords[i] ?? 0) * scale + offsetX - glowHalf);
+          const sy = Math.round((coords[i + 1] ?? 0) * scale + offsetY - glowHalf);
+          if (sx + glowSize < 0 || sy + glowSize < 0 || sx > width || sy > height) continue;
+          ctx.fillRect(sx, sy, glowSize, glowSize);
+        }
+      }
+    }
+    ctx.restore();
   }
 
   /**

@@ -101,7 +101,9 @@ export class QuakeList {
         homePoint
           ? h('div', {
               class: 'quake-list__home',
-              text: `${homePoint.addr} 震度${intensityLabel(homePoint.scale) ?? '-'}`,
+              // 何の行か分かるように、どの県の話かを必ず書く
+              text: `${homePoint.hint}の最大 ${homePoint.addr} 震度${intensityLabel(homePoint.scale) ?? '-'}`,
+              title: '利用地の都道府県で、この地震の震度がいちばん大きかった観測点',
             })
           : null,
         quake.domesticTsunami === 'Warning' || quake.domesticTsunami === 'Watch'
@@ -162,14 +164,16 @@ export class QuakeList {
    * 手掛かりは県名までしか無く (地名は設定させない)、観測点に座標も付いて
    * こないため、同じ県内で複数該当したときは最も揺れた点を採る。
    */
-  private findHomePoint(quake: QuakeInfo): { addr: string; scale: number | null } | null {
+  private findHomePoint(
+    quake: QuakeInfo,
+  ): { hint: string; addr: string; scale: number | null } | null {
     for (const hint of this.homeHints) {
-      let best: { addr: string; scale: number | null } | null = null;
+      let best: { hint: string; addr: string; scale: number | null } | null = null;
       for (const point of quake.points) {
         if (point.isArea) continue;
         if (!point.addr.includes(hint) && !point.pref.includes(hint)) continue;
         if (!best || (point.scale ?? -1) > (best.scale ?? -1)) {
-          best = { addr: point.addr, scale: point.scale };
+          best = { hint, addr: point.addr, scale: point.scale };
         }
       }
       if (best) return best;
