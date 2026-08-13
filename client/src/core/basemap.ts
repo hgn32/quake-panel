@@ -1,3 +1,4 @@
+import { findAreaAtPixel } from '@quake-panel/shared';
 import { resolveUrl } from './urls.js';
 
 export interface BasemapPrefecture {
@@ -48,6 +49,17 @@ export class Basemap {
 
   isLoaded(): boolean {
     return this.data !== null;
+  }
+
+  /**
+   * 配信画像のピクセル座標にある都道府県名。無ければ null (海上など)。
+   *
+   * 利用地の都道府県を座標から引くために使う。地名を設定させなくても
+   * 「自宅のある県」の観測点を履歴で前に出せる。
+   */
+  prefectureAtPixel(x: number, y: number): string | null {
+    if (!this.data) return null;
+    return findAreaAtPixel(this.data.prefectures, x, y);
   }
 
   get attribution(): string {

@@ -19,12 +19,12 @@
         </div>
         <div class="topbar__title">
           <span class="topbar__name">地震速報パネル</span>
-          <span id="frame-time" class="topbar__frame">強震モニタ --:--:--</span>
         </div>
         <div class="topbar__status">
-          <span id="status-link" class="chip chip--muted">接続中…</span>
-          <span id="status-kmoni" class="chip chip--muted">強震モニタ</span>
-          <span id="status-p2p" class="chip chip--muted">P2P</span>
+          <!-- 何の状態かが一目で分かるよう、名前と状態を必ず一緒に出す -->
+          <span id="status-link" class="chip chip--muted">サーバー 接続中…</span>
+          <span id="status-kmoni" class="chip chip--muted">強震モニタ ―</span>
+          <span id="status-p2p" class="chip chip--muted">地震情報 ―</span>
           <button id="settings-open" class="icon-button" type="button" aria-label="設定">設定</button>
         </div>
       </header>

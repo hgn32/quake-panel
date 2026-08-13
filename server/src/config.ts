@@ -51,7 +51,8 @@ export interface Config {
   quakeHistorySize: number;
   /** EEW を「表示終了」とみなすまでの時間 (ms) */
   eewRetentionMs: number;
-  home: { name: string; lat: number; lon: number };
+  /** 利用地の座標。地名は持たない (必要な都道府県名はクライアントが座標から引く)。 */
+  home: { lat: number; lon: number };
   /** 津波予報で強調する予報区名 */
   tsunamiHomeAreas: string[];
   logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -83,11 +84,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     quakeHistorySize: num(env['QUAKE_HISTORY_SIZE'], 12),
     eewRetentionMs: num(env['EEW_RETENTION_MS'], 180_000),
     home: {
-      name: str(env['HOME_NAME'], HOME_LOCATION.name),
       lat: num(env['HOME_LAT'], HOME_LOCATION.lat),
       lon: num(env['HOME_LON'], HOME_LOCATION.lon),
     },
-    tsunamiHomeAreas: str(env['TSUNAMI_HOME_AREAS'], '宮崎県')
+    tsunamiHomeAreas: str(env['TSUNAMI_HOME_AREAS'], '東京都')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),

@@ -10,11 +10,11 @@ services:
     environment:
       TZ: Asia/Tokyo
       LOG_LEVEL: info
-      # 利用地。津波予報の強調と地図の初期位置に使う。
-      HOME_NAME: 宮崎県延岡市
-      HOME_LAT: '32.582'
-      HOME_LON: '131.665'
-      TSUNAMI_HOME_AREAS: 宮崎県
+      # 利用地。地図の初期位置と履歴の強調に使う (地名は設定しない)。
+      HOME_LAT: '35.681'
+      HOME_LON: '139.767'
+      # 津波予報で強調する予報区
+      TSUNAMI_HOME_AREAS: 東京都
       # 実測で kmoni は毎秒更新。負荷を抑えたい場合は 2000 にする。
       KMONI_IDLE_FRAME_INTERVAL_MS: '1000'
       KMONI_ACTIVE_FRAME_INTERVAL_MS: '1000'

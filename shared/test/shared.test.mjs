@@ -36,15 +36,15 @@ describe('kmoni の座標変換', () => {
     }
   });
 
-  it('延岡が画像の内側に入る', () => {
-    const px = latLonToPixel(32.582, 131.665);
+  it('東京が画像の内側に入る', () => {
+    const px = latLonToPixel(35.681, 139.767);
     assert.ok(px.x > 0 && px.x < KMONI_MAP.width);
     assert.ok(px.y > 0 && px.y < KMONI_MAP.height);
   });
 
   it('南西諸島はインセット側へ寄せられる', () => {
     assert.equal(isInsetLocation(26.21, 127.68), true); // 那覇
-    assert.equal(isInsetLocation(32.582, 131.665), false); // 延岡
+    assert.equal(isInsetLocation(35.681, 139.767), false); // 東京
     const naha = projectToPixel(26.21, 127.68);
     // 素の投影では画像の下にはみ出すが、インセット適用後は画像内に収まる
     assert.ok(latLonToPixel(26.21, 127.68).y > KMONI_MAP.height);

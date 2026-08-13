@@ -44,8 +44,10 @@ export class App {
   private quakes: QuakeInfo[] = [];
   private tsunami: TsunamiInfo | null = null;
   private eew: EewState | null = null;
-  private home = { name: '', lat: 35, lon: 135 };
+  private home = { lat: 35, lon: 135 };
   private clockTimer: number | null = null;
+  private cursorTimer: number | null = null;
+  private testFlashTimer: number | null = null;
 
   constructor() {
     this.alert = new AlertPresenter(requireElement('flash'));
@@ -66,7 +68,6 @@ export class App {
       requireElement('status-link'),
       requireElement('status-kmoni'),
       requireElement('status-p2p'),
-      requireElement('frame-time'),
       requireElement('map-notice'),
     );
     this.eewPanel = new EewPanel(requireElement('eew-panel'));
@@ -79,7 +80,7 @@ export class App {
       closeButton: requireElement('settings-close'),
       getSettings: () => this.settings,
       onChange: (patch) => this.applySettings(patch),
-      onTestSound: () => this.alert.audio.test(),
+      onTest: () => this.runAlertTest(),
     });
 
     this.connection = new ServerConnection({
@@ -92,6 +93,7 @@ export class App {
     this.renderLegend();
     this.startClock();
     this.setupAudioGate();
+    this.setupCursorAutoHide();
     await this.mapView.init();
     this.connection.start();
 
@@ -140,7 +142,10 @@ export class App {
   private applySnapshot(snapshot: StateSnapshot): void {
     this.home = snapshot.home;
     this.mapView.setOptions({ home: snapshot.home });
-    this.quakeList.setHomeHints(homeHints(snapshot.home.name));
+    // 利用地の県は座標から引く。地名を設定させないための遠回りだが、
+    // 履歴で「自分の県の観測点」を前に出すにはこれで足りる。
+    const prefecture = this.mapView.prefectureAt(snapshot.home.lat, snapshot.home.lon);
+    this.quakeList.setHomeHints(prefecture ? [prefecture] : []);
     this.quakes = snapshot.quakes;
     this.renderQuakes();
     this.applyHealth(snapshot.health);
@@ -213,6 +218,41 @@ export class App {
   }
 
   /**
+   * 設定画面のテスト。音だけでは「気づけるか」の確認にならないので、
+   * 実際の警報と同じ明滅も一緒に出す。数秒で本来の状態へ戻す。
+   */
+  private runAlertTest(): void {
+    this.alert.audio.test();
+    if (this.testFlashTimer !== null) window.clearTimeout(this.testFlashTimer);
+    this.alert.setFlash('warning');
+    this.testFlashTimer = window.setTimeout(() => {
+      this.testFlashTimer = null;
+      // 実際に警報が出ていればそちらが勝つ (テストで消してしまわない)
+      this.refreshFlash();
+    }, 4000);
+  }
+
+  /**
+   * 操作していない間はマウスカーソルを消す。
+   *
+   * 常時表示のパネルに矢印が残り続けるのは邪魔だが、最初から消えていると
+   * 設定を開きたいときに困る。動かしたら出す、止まったら消す、にしておく。
+   */
+  private setupCursorAutoHide(): void {
+    const HIDE_AFTER_MS = 3000;
+    const show = (): void => {
+      document.body.classList.remove('cursor-hidden');
+      if (this.cursorTimer !== null) window.clearTimeout(this.cursorTimer);
+      this.cursorTimer = window.setTimeout(() => {
+        document.body.classList.add('cursor-hidden');
+      }, HIDE_AFTER_MS);
+    };
+    document.addEventListener('pointermove', show);
+    document.addEventListener('pointerdown', show);
+    show();
+  }
+
+  /**
    * 自動再生制限の解除。Chromium キオスクなら起動フラグでも回避できるが、
    * 普通のブラウザで開いたときのために操作待ちの案内を出す (§4)。
    */
@@ -249,24 +289,11 @@ export class App {
 
   dispose(): void {
     if (this.clockTimer !== null) window.clearInterval(this.clockTimer);
+    if (this.cursorTimer !== null) window.clearTimeout(this.cursorTimer);
+    if (this.testFlashTimer !== null) window.clearTimeout(this.testFlashTimer);
     this.connection.stop();
     this.frames.dispose();
     this.mapView.dispose();
     this.eewPanel.dispose();
   }
-}
-
-/** "宮崎県延岡市" のような表記から、観測点名との照合に使う手掛かりを作る */
-function homeHints(name: string): string[] {
-  const hints: string[] = [];
-  const match = /^(.+?[都道府県])(.*)$/.exec(name);
-  if (match) {
-    const [, pref, rest] = match;
-    const city = (rest ?? '').replace(/[市区町村].*$/, '');
-    if (city) hints.push(city);
-    if (pref) hints.push(pref);
-  } else if (name) {
-    hints.push(name);
-  }
-  return hints;
 }

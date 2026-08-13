@@ -19,11 +19,11 @@ const ISSUE_LABEL: Record<string, string> = {
 /**
  * 地震情報の履歴。
  *
- * 延岡付近の震度は、ここに出る気象庁発表の実測値で確認する。
+ * 利用地付近の震度は、ここに出る気象庁発表の実測値で確認する。
  * 強震モニタ画像の色から震度を推定する処理は規約上行わない (§2(2), Phase 4 除外)。
  */
 export class QuakeList {
-  /** homeHints は利用地の手掛かり (例: ["延岡", "宮崎県"])。前にあるものほど優先。 */
+  /** homeHints は利用地の手掛かり (例: ["東京都"])。前にあるものほど優先。 */
   constructor(
     private readonly root: HTMLElement,
     private homeHints: readonly string[],
@@ -89,13 +89,23 @@ export class QuakeList {
     );
   }
 
-  /** 利用地の観測点があれば拾って前に出す。手掛かりの並び順で優先度が決まる。 */
+  /**
+   * 利用地の観測点があれば拾って前に出す。手掛かりの並び順で優先度が決まる。
+   *
+   * 手掛かりは県名までしか無く (地名は設定させない)、観測点に座標も付いて
+   * こないため、同じ県内で複数該当したときは最も揺れた点を採る。
+   */
   private findHomePoint(quake: QuakeInfo): { addr: string; scale: number | null } | null {
     for (const hint of this.homeHints) {
-      const hit = quake.points.find(
-        (p) => !p.isArea && (p.addr.includes(hint) || p.pref.includes(hint)),
-      );
-      if (hit) return { addr: hit.addr, scale: hit.scale };
+      let best: { addr: string; scale: number | null } | null = null;
+      for (const point of quake.points) {
+        if (point.isArea) continue;
+        if (!point.addr.includes(hint) && !point.pref.includes(hint)) continue;
+        if (!best || (point.scale ?? -1) > (best.scale ?? -1)) {
+          best = { addr: point.addr, scale: point.scale };
+        }
+      }
+      if (best) return best;
     }
     return null;
   }
