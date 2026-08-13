@@ -14,13 +14,13 @@ export interface Settings {
   volume: number;
   /** 観測点の発光表現 (重い端末では切る) */
   glow: boolean;
-  /** 配信画像に焼き込まれた見出し帯を表示しない */
-  hideCaption: boolean;
   /** 履歴に表示する件数 */
   historyCount: number;
   /** 利用地。地図の中心と、履歴で自分の県を前に出すのに使う */
   home: { lat: number; lon: number };
-  /** 津波予報で自分ごととして強調する予報区 */
+  /** 津波予報で強調する予報区を利用地から決めるか、自分で選ぶか */
+  tsunamiMode: 'auto' | 'manual';
+  /** tsunamiMode が manual のときに使う予報区 */
   tsunamiAreas: string[];
   /** 地図の表示位置。スクロール・拡大でそのまま更新される */
   view: MapViewState;
@@ -37,10 +37,10 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyForecast: true,
   volume: 0.7,
   glow: true,
-  hideCaption: true,
   historyCount: 6,
   home: { lat: HOME_LOCATION.lat, lon: HOME_LOCATION.lon },
-  tsunamiAreas: ['東京都'],
+  tsunamiMode: 'auto',
+  tsunamiAreas: [],
   view: fullMapView(),
   locked: false,
 };
@@ -109,9 +109,9 @@ function readStored(storage: Storage | null): Settings {
       notifyForecast: parsed.notifyForecast ?? DEFAULT_SETTINGS.notifyForecast,
       volume: clamp(parsed.volume ?? DEFAULT_SETTINGS.volume, 0, 1),
       glow: parsed.glow ?? DEFAULT_SETTINGS.glow,
-      hideCaption: parsed.hideCaption ?? DEFAULT_SETTINGS.hideCaption,
       historyCount: clamp(parsed.historyCount ?? DEFAULT_SETTINGS.historyCount, 3, 12),
       home: readHome(parsed.home) ?? { ...DEFAULT_SETTINGS.home },
+      tsunamiMode: parsed.tsunamiMode === 'manual' ? 'manual' : 'auto',
       tsunamiAreas: readAreas(parsed.tsunamiAreas) ?? [...DEFAULT_SETTINGS.tsunamiAreas],
       view: readView(parsed.view, parsed.zoom),
       locked: parsed.locked ?? DEFAULT_SETTINGS.locked,
@@ -158,7 +158,9 @@ export function readUrlOverrides(search: string): {
   if (tsunami !== null) {
     const areas = readAreas(tsunami.split(','));
     if (areas) {
+      // URL で予報区を指定したなら、利用地からの自動決定より優先する
       overrides.tsunamiAreas = areas;
+      overrides.tsunamiMode = 'manual';
       keys.add('tsunamiAreas');
     }
   }

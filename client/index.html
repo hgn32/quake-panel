@@ -21,8 +21,10 @@
           <span class="topbar__name">地震速報パネル</span>
         </div>
         <div class="topbar__status">
-          <!-- 何の状態かが一目で分かるよう、名前と状態を必ず一緒に出す -->
-          <span id="status-link" class="chip chip--muted">サーバー 接続中…</span>
+          <!-- 何の状態かが一目で分かるよう、名前と状態を必ず一緒に出す。
+               サーバーとの接続は、切れているときだけ出す (つながっていれば他の
+               2 つが動いていること自体が接続の証拠になる)。 -->
+          <span id="status-link" class="chip chip--bad" hidden>サーバー 切断</span>
           <span id="status-kmoni" class="chip chip--muted">強震モニタ ―</span>
           <span id="status-p2p" class="chip chip--muted">地震情報 ―</span>
           <button id="settings-open" class="icon-button" type="button" aria-label="設定">設定</button>
@@ -33,6 +35,23 @@
         <section class="map-pane">
           <canvas id="map" class="map-canvas"></canvas>
           <div id="map-notice" class="map-notice" hidden></div>
+
+          <!-- 利用地を選ぶモード。押した位置は仮で、決定するまで保存しない -->
+          <div id="map-pick" class="map-pick" hidden>
+            <span class="map-pick__label">利用地にする場所を地図でクリックしてください</span>
+            <span id="map-pick-value" class="map-pick__value">未選択</span>
+            <button id="map-pick-ok" class="button button--accent" type="button">決定</button>
+            <button id="map-pick-cancel" class="button" type="button">キャンセル</button>
+          </div>
+
+          <!-- 地図の操作。設定画面ではなく地図の上に置く (何が動くか分かるように) -->
+          <div id="map-controls" class="map-controls">
+            <button id="map-zoom-in" class="map-controls__button" type="button" title="拡大">＋</button>
+            <span id="map-zoom-value" class="map-controls__value">1.0x</span>
+            <button id="map-zoom-out" class="map-controls__button" type="button" title="縮小">−</button>
+            <button id="map-view-japan" class="map-controls__button map-controls__button--wide" type="button">日本全体</button>
+            <button id="map-view-home" class="map-controls__button map-controls__button--wide" type="button">利用地</button>
+          </div>
           <div class="map-credit">
             <!-- クレジット表示は利用条件 §2(1) の成立条件 -->
             強震モニタ (防災科学技術研究所) / 地震・津波情報: 気象庁 (P2P地震情報経由)
@@ -55,7 +74,10 @@
       <div class="modal__body">
         <h2 class="modal__title">設定</h2>
         <div id="settings-form" class="settings"></div>
-        <button id="settings-close" class="button" type="button">閉じる</button>
+        <div class="modal__footer">
+          <button id="settings-cancel" class="button" type="button">取消</button>
+          <button id="settings-close" class="button button--accent" type="button">保存して閉じる</button>
+        </div>
       </div>
     </div>
 

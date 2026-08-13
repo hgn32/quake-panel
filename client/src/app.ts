@@ -1,6 +1,7 @@
 import {
   applyHomeAreas,
   formatJstClock,
+  tsunamiAreasForPrefecture,
   intensityColor,
   intensityLabel,
   type EewState,
@@ -13,7 +14,7 @@ import {
 import { AlertPresenter } from './core/alert.js';
 import { ServerConnection, type ConnectionState } from './core/connection.js';
 import { FrameStream } from './core/frameStream.js';
-import { MapView, fullMapView, homeMapView, type MapViewState } from './core/mapView.js';
+import { MapView, ZOOM_RANGE, fullMapView, homeMapView, type MapViewState } from './core/mapView.js';
 import { SettingsStore, type Settings } from './settings.js';
 import { h, replaceChildren, requireElement } from './ui/dom.js';
 import { EewPanel } from './ui/eewPanel.js';
@@ -59,12 +60,11 @@ export class App {
       requireElement<HTMLCanvasElement>('map'),
       {
         glow: this.settings.glow,
-        hideCaption: this.settings.hideCaption,
         view: this.settings.view,
         interactive: !this.settings.locked,
         home: this.settings.home,
       },
-      (view) => this.saveViewLater(view),
+      (view) => this.handleViewChange(view),
     );
     this.frames = new FrameStream((frame) => {
       this.mapView.setFrame(frame);
@@ -85,15 +85,16 @@ export class App {
       form: requireElement('settings-form'),
       openButton: requireElement('settings-open'),
       closeButton: requireElement('settings-close'),
+      cancelButton: requireElement('settings-cancel'),
       getSettings: () => this.settings,
       isFixedByUrl: (key) => this.store.isFixedByUrl(key),
       onChange: (patch) => this.applySettings(patch),
       onTest: () => this.runAlertTest(),
       onPickHome: () => this.startHomePick(),
-      onResetView: (preset) =>
-        this.applySettings({
-          view: preset === 'home' ? homeMapView(this.settings.home) : fullMapView(),
-        }),
+      describeTsunamiAreas: () => {
+        const areas = this.homeAreas();
+        return areas.length > 0 ? areas.join('、') : '(利用地の県が分からないため無し)';
+      },
     });
 
     this.connection = new ServerConnection({
@@ -107,6 +108,7 @@ export class App {
     this.startClock();
     this.setupAudioGate();
     this.setupCursorAutoHide();
+    this.setupMapControls();
     await this.mapView.init();
     this.refreshHomeHints();
     this.connection.start();
@@ -177,7 +179,7 @@ export class App {
 
   private applyTsunami(info: TsunamiInfo | null): void {
     // どの予報区を自分ごとにするかは端末ごとの設定なので、ここで印を付ける
-    const tsunami = info ? applyHomeAreas(info, this.settings.tsunamiAreas) : null;
+    const tsunami = info ? applyHomeAreas(info, this.homeAreas()) : null;
     this.tsunami = tsunami;
     this.tsunamiPanel.update(tsunami);
     this.mapView.setTsunami(tsunami);
@@ -205,23 +207,67 @@ export class App {
     this.alert.audio.setVolume(this.settings.volume);
     this.mapView.setOptions({
       glow: this.settings.glow,
-      hideCaption: this.settings.hideCaption,
       view: this.settings.view,
       interactive: !this.settings.locked,
       home: this.settings.home,
     });
-    if (
-      before.home.lat !== this.settings.home.lat ||
-      before.home.lon !== this.settings.home.lon
-    ) {
-      this.refreshHomeHints();
-    }
-    if (before.tsunamiAreas !== this.settings.tsunamiAreas) {
+    this.updateMapControls();
+    const homeMoved =
+      before.home.lat !== this.settings.home.lat || before.home.lon !== this.settings.home.lon;
+    if (homeMoved) this.refreshHomeHints();
+    if (homeMoved || before.tsunamiAreas !== this.settings.tsunamiAreas ||
+        before.tsunamiMode !== this.settings.tsunamiMode) {
       // 印の付け直し (表示中の予報にも即座に効かせる)
       this.applyTsunami(this.tsunami);
     }
     this.refreshFlash();
     this.renderQuakes();
+  }
+
+  /**
+   * 強調する津波予報区。
+   * 自動のときは利用地の都道府県から決める (予報区名は県名と一致しないものがある)。
+   */
+  private homeAreas(): string[] {
+    if (this.settings.tsunamiMode === 'manual') {
+      return this.settings.tsunamiAreas.flatMap((area) => tsunamiAreasForPrefecture(area));
+    }
+    return tsunamiAreasForPrefecture(
+      this.mapView.prefectureAt(this.settings.home.lat, this.settings.home.lon),
+    );
+  }
+
+  /**
+   * 地図の操作は地図の上に置く。設定画面に倍率の数字だけ置いても、
+   * 何がどう動くのかが分からない。
+   */
+  private setupMapControls(): void {
+    const zoomBy = (factor: number): void => {
+      const view = this.settings.view;
+      const zoom = Math.min(Math.max(view.zoom * factor, ZOOM_RANGE.min), ZOOM_RANGE.max);
+      this.applySettings({ view: { ...view, zoom } });
+    };
+    requireElement('map-zoom-in').addEventListener('click', () => zoomBy(1.4));
+    requireElement('map-zoom-out').addEventListener('click', () => zoomBy(1 / 1.4));
+    requireElement('map-view-japan').addEventListener('click', () =>
+      this.applySettings({ view: fullMapView() }),
+    );
+    requireElement('map-view-home').addEventListener('click', () =>
+      this.applySettings({ view: homeMapView(this.settings.home) }),
+    );
+    this.updateMapControls();
+  }
+
+  private updateMapControls(): void {
+    requireElement('map-zoom-value').textContent = `${this.settings.view.zoom.toFixed(1)}x`;
+    // 固定中は操作しても動かないので、ボタン自体を隠す
+    requireElement('map-controls').hidden = this.settings.locked;
+  }
+
+  private handleViewChange(view: MapViewState): void {
+    this.settings = { ...this.settings, view };
+    this.updateMapControls();
+    this.saveViewLater(view);
   }
 
   /** 利用地の県は座標から引く。地名を設定させないための遠回り。 */
@@ -230,22 +276,56 @@ export class App {
     this.quakeList.setHomeHints(prefecture ? [prefecture] : []);
   }
 
-  /** 地図から利用地を選ぶ。選ぶまでは案内を出しておく。 */
+  /**
+   * 地図から利用地を選ぶ。
+   *
+   * クリックしただけでは確定させず、地図の上の帯に候補を出して「決定」を待つ。
+   * 押した瞬間に保存されると、選べたのか・選び直せるのかが分からない。
+   */
   private startHomePick(): void {
-    this.statusBar.setNotice('地図をクリックして利用地を選んでください (Esc で取消)');
-    const cancel = (ev: KeyboardEvent): void => {
-      if (ev.key !== 'Escape') return;
-      this.mapView.cancelPick();
-      finish();
-    };
+    const bar = requireElement('map-pick');
+    const value = requireElement('map-pick-value');
+    const okButton = requireElement<HTMLButtonElement>('map-pick-ok');
+    const cancelButton = requireElement('map-pick-cancel');
+    const before = { ...this.settings.home };
+    let picked: { lat: number; lon: number } | null = null;
+
     const finish = (): void => {
-      document.removeEventListener('keydown', cancel);
-      this.statusBar.setNotice(null);
+      this.mapView.cancelPick();
+      bar.hidden = true;
+      document.removeEventListener('keydown', onKey);
+      okButton.removeEventListener('click', onOk);
+      cancelButton.removeEventListener('click', onCancel);
     };
-    document.addEventListener('keydown', cancel);
-    this.mapView.startPick((location) => {
+    const onOk = (): void => {
+      if (!picked) return;
       finish();
-      this.applySettings({ home: { lat: round3(location.lat), lon: round3(location.lon) } });
+      this.applySettings({ home: picked });
+      this.statusBar.flashNotice(`利用地を保存しました (${picked.lat}, ${picked.lon})`);
+    };
+    const onCancel = (): void => {
+      finish();
+      // 仮表示で動かしたマーカーを元に戻す
+      this.mapView.setOptions({ home: before });
+    };
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') onCancel();
+      if (ev.key === 'Enter') onOk();
+    };
+
+    value.textContent = '未選択';
+    okButton.disabled = true;
+    bar.hidden = false;
+    document.addEventListener('keydown', onKey);
+    okButton.addEventListener('click', onOk);
+    cancelButton.addEventListener('click', onCancel);
+
+    this.mapView.startPick((location) => {
+      picked = { lat: round3(location.lat), lon: round3(location.lon) };
+      value.textContent = `${picked.lat}, ${picked.lon}`;
+      okButton.disabled = false;
+      // マーカーを仮の位置へ動かして、どこを選んだか見えるようにする
+      this.mapView.setOptions({ home: picked });
     });
   }
 

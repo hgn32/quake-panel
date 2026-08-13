@@ -26,8 +26,6 @@ export const ZOOM_RANGE = { min: 1, max: 8 } as const;
 export interface MapViewOptions {
   /** 観測点の発光表現。Pi4 で重い場合に切れるようにしておく。 */
   glow: boolean;
-  /** 配信画像に焼き込まれた見出し帯を描かない (§KMONI_CAPTION_BOX の説明を参照) */
-  hideCaption: boolean;
   /** 表示位置。ホイールとドラッグで動く */
   view: MapViewState;
   /** false ならホイールもドラッグも受け付けない (キオスク運用) */
@@ -71,6 +69,8 @@ export class MapView {
   private animating = false;
   private resizeObserver: ResizeObserver | null = null;
   private drag: { pointerId: number; x: number; y: number; moved: number } | null = null;
+  private shrunk: HTMLCanvasElement | null = null;
+  private shrunkFor: ImageBitmap | null = null;
   private pick: ((location: { lat: number; lon: number }) => void) | null = null;
 
   constructor(
@@ -133,7 +133,10 @@ export class MapView {
 
   /**
    * 利用地を地図から選ぶモードに入る。
-   * 次のクリック位置を緯度経度に直して返す。ドラッグでのスクロールは効いたまま。
+   *
+   * クリックのたびに候補の座標を返すだけで、モードは抜けない (決めるのは呼び出し側)。
+   * 押した位置がその場で確定してしまうと「選び直せるのか」が分からないため。
+   * ドラッグでのスクロールとホイールでの拡大縮小は効いたまま。
    */
   startPick(onPick: (location: { lat: number; lon: number }) => void): void {
     this.pick = onPick;
@@ -184,10 +187,7 @@ export class MapView {
     }
     // 動かさずに離したときだけ「クリック」とみなす (スクロールと区別する)
     if (drag.moved > 4 || !this.pick) return;
-    const picked = this.locationAt(ev.clientX, ev.clientY);
-    const onPick = this.pick;
-    this.cancelPick();
-    onPick(picked);
+    this.pick(this.locationAt(ev.clientX, ev.clientY));
   };
 
   /** ドラッグ中に出る選択メニューを抑える */
@@ -430,31 +430,74 @@ export class MapView {
       ctx.globalAlpha = 1;
     }
 
+    // 観測点は 3x3 px で描かれていて、そのまま引き伸ばすと四角が大きすぎる。
+    // 2x2 に削ったものを使い、削れた半画素ぶんはずらして中心を合わせる。
+    const points = this.shrinkPoints(frame.realtime);
+    ctx.save();
+    ctx.translate(0.5, 0.5);
     if (this.options.glow) {
       // 観測点を少しにじませて重ねると、拡大時の粗さが目立たなくなる。
       ctx.save();
       ctx.filter = `blur(${(1.6 / this.transform.scale).toFixed(2)}px)`;
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = 0.55;
-      this.drawLayer(ctx, frame.realtime);
+      this.drawLayer(ctx, points);
       ctx.restore();
     }
-    this.drawLayer(ctx, frame.realtime);
+    this.drawLayer(ctx, points);
+    ctx.restore();
 
     if (frame.psWave) this.drawLayer(ctx, frame.psWave);
     ctx.restore();
   }
 
+
   /**
-   * 配信画像を等倍で重ねる。見出し帯を隠す設定のときは、その矩形を避けて
-   * 2 回に分けて描く (画像そのものは加工しない)。
+   * 観測点の四角を一回り小さくしたものを作る。
+   *
+   * 配信画像では観測点が 3x3 px で描かれていて、フル HD へ引き伸ばすと
+   * 四角が大きすぎて地図が埋まる。右と下が埋まっている画素だけを残して
+   * 2x2 にし、失われる半画素ぶんは描画時にずらして中心を合わせる。
+   * 元の画像には手を加えず、描画用の複製を作るだけ (§2(2))。
    */
-  private drawLayer(ctx: CanvasRenderingContext2D, bitmap: ImageBitmap): void {
+  private shrinkPoints(bitmap: ImageBitmap): CanvasImageSource {
+    if (this.shrunkFor === bitmap && this.shrunk) return this.shrunk;
     const { width, height } = KMONI_MAP;
-    if (!this.options.hideCaption) {
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      return;
+    const canvas = this.shrunk ?? document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return bitmap;
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(bitmap, 0, 0);
+    const image = ctx.getImageData(0, 0, width, height);
+    const src = image.data;
+    const out = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < height - 1; y += 1) {
+      for (let x = 0; x < width - 1; x += 1) {
+        const i = (y * width + x) * 4;
+        if (src[i + 3] === 0) continue;
+        // 右と下が埋まっていない画素 = 四角の右端・下端なので落とす
+        if (src[i + 7] === 0 || src[i + width * 4 + 3] === 0) continue;
+        out[i] = src[i] ?? 0;
+        out[i + 1] = src[i + 1] ?? 0;
+        out[i + 2] = src[i + 2] ?? 0;
+        out[i + 3] = src[i + 3] ?? 0;
+      }
     }
+    ctx.putImageData(new ImageData(out, width, height), 0, 0);
+    this.shrunk = canvas;
+    this.shrunkFor = bitmap;
+    return canvas;
+  }
+
+  /**
+   * 配信画像を等倍で重ねる。左上の見出し帯 (英字と時刻) は画面を占領するだけで
+   * 観測点も含まれないため、その矩形を避けて 2 回に分けて描く
+   * (画像そのものは加工しない)。
+   */
+  private drawLayer(ctx: CanvasRenderingContext2D, bitmap: CanvasImageSource): void {
+    const { width, height } = KMONI_MAP;
     const cap = KMONI_CAPTION_BOX;
     // 見出し帯の下 (全幅)
     ctx.drawImage(bitmap, 0, cap.height, width, height - cap.height, 0, cap.height, width, height - cap.height);

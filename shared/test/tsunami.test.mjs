@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { applyHomeAreas } from '../dist/index.js';
+import { applyHomeAreas, tsunamiAreasForPrefecture } from '../dist/index.js';
 
 const info = {
   id: 't1',
@@ -34,5 +34,32 @@ describe('津波予報の利用地判定', () => {
     const marked = applyHomeAreas(info, ['   ']);
     assert.equal(marked.affectsHome, false);
     assert.equal(marked.areas.some((a) => a.isHome), false);
+  });
+});
+
+describe('都道府県から津波予報区を決める', () => {
+  it('県名がそのまま予報区名になる県', () => {
+    assert.deepEqual(tsunamiAreasForPrefecture('宮崎県'), ['宮崎県']);
+    // 「大分県豊後水道沿岸」等は県名を含むので部分一致で拾える
+    assert.deepEqual(tsunamiAreasForPrefecture('大分県'), ['大分県']);
+  });
+
+  it('県名を含まない予報区がある県は補う', () => {
+    const tokyo = tsunamiAreasForPrefecture('東京都');
+    assert.ok(tokyo.includes('東京湾内湾'));
+    assert.ok(tokyo.includes('伊豆諸島'));
+    assert.ok(tsunamiAreasForPrefecture('熊本県').includes('有明・八代海'));
+    assert.ok(tsunamiAreasForPrefecture('沖縄県').includes('宮古島・八重山地方'));
+  });
+
+  it('利用地の県が分からなければ空', () => {
+    assert.deepEqual(tsunamiAreasForPrefecture(null), []);
+  });
+
+  it('自動で決めた予報区で実際に印が付く', () => {
+    const areas = tsunamiAreasForPrefecture('東京都');
+    const marked = applyHomeAreas(info, areas);
+    assert.equal(marked.areas[0].isHome, true); // 東京湾内湾
+    assert.equal(marked.areas[1].isHome, true); // 伊豆諸島
   });
 });
