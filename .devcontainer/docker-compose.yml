@@ -16,13 +16,13 @@ services:
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
-        NO_PROXY: ${NO_PROXY:-}
+        NO_PROXY: ${HTTPS_PROXY:-}
     environment:
       # Claude Code だけ別プロキシ。postStartCommand.sh が settings.json に反映する。
       PYTHONWARNINGS: ignore:Unverified HTTPS request
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
+      NO_PROXY: 127.0.0.1,localhost,github.com,www.dpro.asahi-kasei.co.jp,vpce.amazonaws.com
       ##App
       TZ: Asia/Tokyo
       LOG_LEVEL: info
