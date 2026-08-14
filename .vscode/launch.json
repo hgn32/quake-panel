@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node-terminal",
+      "name": "server dev",
+      "request": "launch",
+      "command": "{ lsof -ti tcp:8080 -sTCP:LISTEN; pgrep -f '/workspaces/[s]erver/src/index.ts'; } 2>/dev/null | sort -u | xargs -r kill -9 2>/dev/null; npm run dev",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "node-terminal",
+      "name": "client dev",
+      "request": "launch",
+      "command": "{ lsof -ti tcp:5173 -sTCP:LISTEN; pgrep -f 'node_modules/.bin/[v]ite'; } 2>/dev/null | sort -u | xargs -r kill -9 2>/dev/null; npm run dev",
+      "cwd": "${workspaceFolder}/client"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "すべて開始",
+      "configurations": ["server dev", "client dev"]
+    }
+  ]
+}

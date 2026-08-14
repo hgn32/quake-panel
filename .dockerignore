@@ -9,3 +9,6 @@ docs
 deploy
 scripts
 *.log
+.vscode
+.git
+aws

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(grep *)",
+      "Bash(env)",
+      "Bash(cat *)",
+      "Read(//tmp/**)",
+      "Bash(find *)"
+    ]
+  }
+}
