@@ -1,6 +1,7 @@
 import {
   ENDPOINTS,
   isServerEvent,
+  type JsonValue,
   type ClientMessage,
   type ServerEvent,
 } from '@quake-panel/shared';
@@ -80,13 +81,14 @@ export class ServerConnection {
 
     socket.addEventListener('message', (ev) => {
       this.armStallTimer();
-      let parsed: unknown;
+      let parsed: JsonValue;
       try {
-        parsed = JSON.parse(String(ev.data));
+        parsed = JSON.parse(String(ev.data)) as JsonValue;
       } catch {
         return;
       }
-      if (isServerEvent(parsed)) this.options.onEvent(parsed);
+      // 形が合っていることだけ確かめてから、決まった型として扱う
+      if (isServerEvent(parsed)) this.options.onEvent(parsed as ServerEvent);
     });
 
     socket.addEventListener('close', () => this.scheduleReconnect());

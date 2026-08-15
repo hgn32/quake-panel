@@ -156,7 +156,7 @@ export class App {
     });
   }
 
-  async start(): Promise<void> {
+  start(): Promise<void> {
     this.renderLegend();
     this.alert.setFlashSeconds(this.settings.flashSeconds);
     this.alert.audio.setMaxSeconds(this.settings.soundSeconds);
@@ -168,12 +168,13 @@ export class App {
     this.setupAudioGate();
     this.setupCursorAutoHide();
     this.setupMapControls();
-    await this.mapView.init();
-    this.connection.start();
+    return this.mapView.init().then(() => {
+      this.connection.start();
 
-    // タブが再表示されたときは取りこぼしを疑って現況を取り直す
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') this.connection.requestResync();
+      // タブが再表示されたときは取りこぼしを疑って現況を取り直す
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this.connection.requestResync();
+      });
     });
   }
 
@@ -495,13 +496,13 @@ export class App {
     void this.alert.audio.unlock().then((ok) => {
       if (ok) return;
       gate.hidden = false;
-      const dismiss = async (): Promise<void> => {
-        const unlocked = await this.alert.audio.unlock();
-        if (!unlocked) return;
-        gate.hidden = true;
-        document.removeEventListener('pointerdown', handler);
-        document.removeEventListener('keydown', handler);
-      };
+      const dismiss = (): Promise<void> =>
+        this.alert.audio.unlock().then((unlocked) => {
+          if (!unlocked) return;
+          gate.hidden = true;
+          document.removeEventListener('pointerdown', handler);
+          document.removeEventListener('keydown', handler);
+        });
       const handler = (): void => void dismiss();
       document.addEventListener('pointerdown', handler);
       document.addEventListener('keydown', handler);

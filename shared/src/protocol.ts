@@ -1,3 +1,4 @@
+import type { JsonValue } from './homeLocation.js';
 import type { KmoniLayer } from './kmoniLayer.js';
 import type {
   EewDetection,
@@ -40,11 +41,19 @@ export type ClientMessage =
   /** 取りこぼし時などに現況一括を要求する */
   | { type: 'resync' };
 
-export function isServerEvent(value: unknown): value is ServerEvent {
+/**
+ * サーバーからの通知として扱ってよいか。
+ *
+ * 型述語 (`value is ServerEvent`) にはできない。ServerEvent は JSON の形より
+ * 狭いので TS が「絞り込み先が引数の型に収まらない」と拒否する。
+ * ここでは形だけ確かめ、呼び出し側で ServerEvent として扱う。
+ */
+export function isServerEvent(value: JsonValue): boolean {
   return (
     typeof value === 'object' &&
     value !== null &&
-    typeof (value as { type?: unknown }).type === 'string'
+    !Array.isArray(value) &&
+    typeof value['type'] === 'string'
   );
 }
 

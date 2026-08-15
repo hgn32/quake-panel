@@ -29,30 +29,40 @@ export interface FetchOptions {
   signal?: AbortSignal;
 }
 
-async function request(url: string, opts: FetchOptions): Promise<Response> {
+function request(url: string, opts: FetchOptions): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('timeout')), opts.timeoutMs);
   const onAbort = (): void => controller.abort(opts.signal?.reason);
   opts.signal?.addEventListener('abort', onAbort, { once: true });
-  try {
-    return await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'user-agent': 'quake-panel/0.1 (private household display)',
-        ...(opts.noStore ? { 'cache-control': 'no-cache', pragma: 'no-cache' } : {}),
-      },
-      redirect: opts.missingOnRedirect ? 'manual' : 'follow',
-    });
-  } finally {
+  // 成否によらずタイマーと購読を必ず外す (finally 相当)
+  const cleanup = (): void => {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onAbort);
-  }
+  };
+  return fetch(url, {
+    signal: controller.signal,
+    headers: {
+      'user-agent': 'quake-panel/0.1 (private household display)',
+      ...(opts.noStore ? { 'cache-control': 'no-cache', pragma: 'no-cache' } : {}),
+    },
+    redirect: opts.missingOnRedirect ? 'manual' : 'follow',
+  }).then(
+    (res) => {
+      cleanup();
+      return res;
+    },
+    (error: Error) => {
+      cleanup();
+      return Promise.reject(error);
+    },
+  );
 }
 
-export async function fetchJson<T>(url: string, opts: FetchOptions): Promise<T> {
-  const res = await request(url, opts);
-  if (!res.ok) throw new HttpError(res.status, url);
-  return (await res.json()) as T;
+export function fetchJson<T>(url: string, opts: FetchOptions): Promise<T> {
+  return request(url, opts).then((res) => {
+    if (!res.ok) return Promise.reject(new HttpError(res.status, url));
+    return res.json() as Promise<T>;
+  });
 }
 
 export interface BinaryResponse {
@@ -63,15 +73,15 @@ export interface BinaryResponse {
 }
 
 /** 画像取得。存在しない (まだ生成されていない) 場合は null を返す。 */
-export async function fetchBinary(url: string, opts: FetchOptions): Promise<BinaryResponse | null> {
-  const res = await request(url, { ...opts, missingOnRedirect: opts.missingOnRedirect ?? true });
-  if (res.status === 404) return null;
-  if (res.status >= 300 && res.status < 400) return null;
-  if (!res.ok) throw new HttpError(res.status, url);
-  const buf = Buffer.from(await res.arrayBuffer());
-  return {
-    body: buf,
-    contentType: res.headers.get('content-type') ?? 'application/octet-stream',
-    lastModified: res.headers.get('last-modified'),
-  };
+export function fetchBinary(url: string, opts: FetchOptions): Promise<BinaryResponse | null> {
+  return request(url, { ...opts, missingOnRedirect: opts.missingOnRedirect ?? true }).then((res) => {
+    if (res.status === 404) return null;
+    if (res.status >= 300 && res.status < 400) return null;
+    if (!res.ok) return Promise.reject(new HttpError(res.status, url));
+    return res.arrayBuffer().then((buffer) => ({
+      body: Buffer.from(buffer),
+      contentType: res.headers.get('content-type') ?? 'application/octet-stream',
+      lastModified: res.headers.get('last-modified'),
+    }));
+  });
 }

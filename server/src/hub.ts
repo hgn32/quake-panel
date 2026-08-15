@@ -88,9 +88,7 @@ export class Hub extends EventEmitter {
   /** 起動時の履歴取り込み。イベント配信はせず現況にだけ積む。 */
   seedQuakes(quakes: QuakeInfo[]): void {
     const merged = [...this.quakes];
-    for (const q of quakes) {
-      if (!merged.some((m) => m.id === q.id)) merged.push(q);
-    }
+    quakes.filter((q) => !merged.some((m) => m.id === q.id)).forEach((q) => merged.push(q));
     merged.sort((a, b) => (b.occurredAt ?? '').localeCompare(a.occurredAt ?? ''));
     this.quakes = merged.slice(0, this.config.quakeHistorySize);
   }

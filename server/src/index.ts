@@ -13,7 +13,7 @@ import { ClientWebSocketServer } from './ws/server.js';
 
 const log = createLogger('main');
 
-async function main(): Promise<void> {
+function main(): Promise<void> {
   const config = loadConfig();
   setLogLevel(config.logLevel);
 
@@ -39,21 +39,28 @@ async function main(): Promise<void> {
   const haNotifier = new HomeAssistantNotifier(config, hub);
 
   // 時刻同期だけは先に済ませる。ここがずれていると最初のフレーム取得が全部 404 になる。
-  await clock.start();
-  coordinator.start();
-  frames.start();
-  kmoniEew.start();
-  wsServer.start();
-  await p2p.seedHistory();
-  p2p.start();
-  haNotifier.start();
-
-  await new Promise<void>((resolvePromise, reject) => {
-    httpServer.once('error', reject);
-    httpServer.listen(config.port, config.host, () => resolvePromise());
-  });
-  log.info(`listening on http://${config.host}:${config.port} (static: ${config.staticDir})`);
-  log.info('データ提供: 防災科学技術研究所 強震モニタ / P2P地震情報');
+  return clock
+    .start()
+    .then(() => {
+      coordinator.start();
+      frames.start();
+      kmoniEew.start();
+      wsServer.start();
+      return p2p.seedHistory();
+    })
+    .then(() => {
+      p2p.start();
+      haNotifier.start();
+      return new Promise<void>((resolvePromise, reject) => {
+        httpServer.once('error', reject);
+        httpServer.listen(config.port, config.host, () => resolvePromise());
+      });
+    })
+    .then(() => {
+      log.info(`listening on http://${config.host}:${config.port} (static: ${config.staticDir})`);
+      log.info('データ提供: 防災科学技術研究所 強震モニタ / P2P地震情報');
+      registerShutdown();
+    });
 
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
@@ -72,14 +79,16 @@ async function main(): Promise<void> {
       setTimeout(() => process.exit(0), 5000).unref();
     });
   };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('unhandledRejection', (reason) => {
-    log.error(`unhandled rejection: ${describeError(reason)}`);
-  });
+  function registerShutdown(): void {
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('unhandledRejection', (reason: Error) => {
+      log.error(`unhandled rejection: ${describeError(reason)}`);
+    });
+  }
 }
 
-main().catch((error) => {
+main().catch((error: Error) => {
   log.error(`startup failed: ${describeError(error)}`);
   process.exit(1);
 });

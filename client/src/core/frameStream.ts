@@ -55,49 +55,55 @@ export class FrameStream {
     this.current = null;
   }
 
-  private async pump(): Promise<void> {
+  /**
+   * 溜まっている通知を 1 つずつ処理する。
+   *
+   * 毎秒来るので、前の取得が終わる前に次が来る。最後の 1 件だけを追いかける
+   * ため、処理中は `pending` に上書きしておき、終わってから次へ進む。
+   */
+  private pump(): Promise<void> {
     this.loading = true;
-    try {
-      while (this.pending) {
-        const notice = this.pending;
-        this.pending = null;
-        await this.load(notice);
-      }
-    } finally {
+    const notice = this.pending;
+    this.pending = null;
+    if (!notice) {
       this.loading = false;
+      return Promise.resolve();
     }
+    return this.load(notice).then(() => this.pump());
   }
 
-  private async load(notice: FrameNotice): Promise<void> {
+  private load(notice: FrameNotice): Promise<void> {
     this.inflight?.abort();
     const controller = new AbortController();
     this.inflight = controller;
 
-    try {
-      const [realtime, psWave, estShindo] = await Promise.all([
-        loadBitmap(resolveUrl(ENDPOINTS.frame(this.layer, notice.timestamp)), controller.signal),
-        notice.layers.psWave
-          ? loadBitmap(resolveUrl(ENDPOINTS.psWave(notice.timestamp)), controller.signal)
-          : Promise.resolve(null),
-        notice.layers.estShindo
-          ? loadBitmap(resolveUrl(ENDPOINTS.estShindo(notice.timestamp)), controller.signal)
-          : Promise.resolve(null),
-      ]);
-      if (controller.signal.aborted) {
-        closeAll(realtime, psWave, estShindo);
-        return;
-      }
-      if (!realtime) return;
+    return Promise.all([
+      loadBitmap(resolveUrl(ENDPOINTS.frame(this.layer, notice.timestamp)), controller.signal),
+      notice.layers.psWave
+        ? loadBitmap(resolveUrl(ENDPOINTS.psWave(notice.timestamp)), controller.signal)
+        : Promise.resolve(null),
+      notice.layers.estShindo
+        ? loadBitmap(resolveUrl(ENDPOINTS.estShindo(notice.timestamp)), controller.signal)
+        : Promise.resolve(null),
+    ])
+      .then(([realtime, psWave, estShindo]) => {
+        if (controller.signal.aborted) {
+          closeAll(realtime, psWave, estShindo);
+          return;
+        }
+        if (!realtime) return;
 
-      const next: FrameImages = { notice, realtime, psWave, estShindo };
-      this.release(this.current);
-      this.current = next;
-      this.onFrame(next);
-    } catch {
-      // 1 フレームの取りこぼしは次の通知で回復するので、ここでは何もしない
-    } finally {
-      if (this.inflight === controller) this.inflight = null;
-    }
+        const next: FrameImages = { notice, realtime, psWave, estShindo };
+        this.release(this.current);
+        this.current = next;
+        this.onFrame(next);
+      })
+      .catch(() => {
+        // 1 フレームの取りこぼしは次の通知で回復するので、ここでは何もしない
+      })
+      .then(() => {
+        if (this.inflight === controller) this.inflight = null;
+      });
   }
 
   private release(frame: FrameImages | null): void {
@@ -107,13 +113,14 @@ export class FrameStream {
 }
 
 function closeAll(...bitmaps: Array<ImageBitmap | null>): void {
-  for (const bitmap of bitmaps) bitmap?.close();
+  bitmaps.forEach((bitmap) => bitmap?.close());
 }
 
-async function loadBitmap(url: string, signal: AbortSignal): Promise<ImageBitmap | null> {
-  const res = await fetch(url, { signal, cache: 'force-cache' });
-  if (!res.ok) return null;
-  const blob = await res.blob();
-  if (signal.aborted) return null;
-  return createImageBitmap(blob);
+function loadBitmap(url: string, signal: AbortSignal): Promise<ImageBitmap | null> {
+  return fetch(url, { signal, cache: 'force-cache' })
+    .then((res) => (res.ok ? res.blob() : null))
+    .then((blob) => {
+      if (!blob || signal.aborted) return null;
+      return createImageBitmap(blob);
+    });
 }

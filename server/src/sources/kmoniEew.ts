@@ -139,28 +139,28 @@ export class KmoniEewWorker {
     this.timer.unref?.();
   }
 
-  private async tick(): Promise<void> {
+  private tick(): Promise<void> {
     if (this.running) {
       this.schedule(this.config.kmoni.eewIntervalMs);
-      return;
+      return Promise.resolve();
     }
     this.running = true;
     const startedAt = Date.now();
-    try {
-      const timestamp = toKmoniTimestamp(this.clock.latestAvailable());
-      const url = `${this.config.kmoni.baseUrl}/webservice/hypo/eew/${timestamp}.json`;
-      const raw = await fetchJson<KmoniEewRaw>(url, {
-        timeoutMs: this.config.kmoni.requestTimeoutMs,
+    const timestamp = toKmoniTimestamp(this.clock.latestAvailable());
+    const url = `${this.config.kmoni.baseUrl}/webservice/hypo/eew/${timestamp}.json`;
+    return fetchJson<KmoniEewRaw>(url, { timeoutMs: this.config.kmoni.requestTimeoutMs })
+      .then((raw) => {
+        this.hub.markSuccess('kmoniEew');
+        this.onReport(parseKmoniEew(raw));
+      })
+      .catch((error: Error) => {
+        this.hub.markFailure('kmoniEew', describeError(error));
+        log.warn(`eew poll failed: ${describeError(error)}`);
+      })
+      .then(() => {
+        this.running = false;
+        const elapsed = Date.now() - startedAt;
+        this.schedule(Math.max(100, this.config.kmoni.eewIntervalMs - elapsed));
       });
-      this.hub.markSuccess('kmoniEew');
-      this.onReport(parseKmoniEew(raw));
-    } catch (error) {
-      this.hub.markFailure('kmoniEew', describeError(error));
-      log.warn(`eew poll failed: ${describeError(error)}`);
-    } finally {
-      this.running = false;
-      const elapsed = Date.now() - startedAt;
-      this.schedule(Math.max(100, this.config.kmoni.eewIntervalMs - elapsed));
-    }
   }
 }

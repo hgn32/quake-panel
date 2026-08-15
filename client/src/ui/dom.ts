@@ -17,17 +17,18 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   ...children: Child[]
 ): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (value === undefined || value === false) continue;
-    if (key === 'class') el.className = String(value);
-    else if (key === 'text') el.textContent = String(value);
-    else if (key === 'dataset') continue;
-    else el.setAttribute(key, String(value));
-  }
-  for (const child of children) {
-    if (child === null || child === undefined || child === false) continue;
-    el.append(child instanceof Node ? child : document.createTextNode(String(child)));
-  }
+  Object.entries(attrs)
+    .filter(([key, value]) => value !== undefined && value !== false && key !== 'dataset')
+    .forEach(([key, value]) => {
+      if (key === 'class') el.className = String(value);
+      else if (key === 'text') el.textContent = String(value);
+      else el.setAttribute(key, String(value));
+    });
+  children
+    .filter((child) => child !== null && child !== undefined && child !== false)
+    .forEach((child) => {
+      el.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    });
   return el;
 }
 

@@ -56,7 +56,7 @@ export class ClientWebSocketServer {
             });
           }
         } catch (error) {
-          log.debug(`bad client message: ${describeError(error)}`);
+          log.debug(`bad client message: ${describeError(error as Error)}`);
         }
       });
 
@@ -73,31 +73,32 @@ export class ClientWebSocketServer {
 
   start(): void {
     this.heartbeat = setInterval(() => {
-      for (const client of this.clients) {
-        if (!client.alive) {
-          // pong が返らないまま次の周期に入った接続は死んだものとして畳む
+      // pong が返らないまま次の周期に入った接続は死んだものとして畳む
+      [...this.clients]
+        .filter((client) => !client.alive)
+        .forEach((client) => {
           log.debug('terminating unresponsive client');
           client.socket.terminate();
           this.clients.delete(client);
-          continue;
-        }
+        });
+      this.clients.forEach((client) => {
         client.alive = false;
         try {
           client.socket.ping();
         } catch (error) {
-          log.debug(`ping failed: ${describeError(error)}`);
+          log.debug(`ping failed: ${describeError(error as Error)}`);
         }
-      }
+      });
     }, this.config.wsHeartbeatMs);
     this.heartbeat.unref?.();
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
-    for (const client of this.clients) client.socket.close(1001, 'server shutting down');
+    this.clients.forEach((client) => client.socket.close(1001, 'server shutting down'));
     this.clients.clear();
-    await new Promise<void>((resolvePromise) => this.wss.close(() => resolvePromise()));
+    return new Promise<void>((resolvePromise) => this.wss.close(() => resolvePromise()));
   }
 
   get clientCount(): number {
@@ -107,15 +108,15 @@ export class ClientWebSocketServer {
   private broadcast(event: ServerEvent): void {
     if (this.clients.size === 0) return;
     const payload = JSON.stringify(event);
-    for (const client of this.clients) {
-      if (client.socket.readyState !== client.socket.OPEN) continue;
+    this.clients.forEach((client) => {
+      if (client.socket.readyState !== client.socket.OPEN) return;
       // 送信キューが詰まっている相手 (回線が細い/固まっている) には積み増さない
       if (client.socket.bufferedAmount > 1_000_000) {
         log.warn('dropping event for a backlogged client');
-        continue;
+        return;
       }
       client.socket.send(payload);
-    }
+    });
   }
 }
 

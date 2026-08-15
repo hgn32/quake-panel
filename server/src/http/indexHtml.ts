@@ -51,30 +51,28 @@ export function injectBaseHref(html: string, baseHref: string): string {
  * `index.html` を返す。差し込みがあるので長さが変わる。`content-length` を
  * 静的配信側の値のまま使わないよう、ここで完結させている。
  */
-export async function serveIndexHtml(
+export function serveIndexHtml(
   rootDir: string,
   baseHref: string | null,
   res: ServerResponse,
 ): Promise<boolean> {
   const filePath = join(resolve(rootDir), 'index.html');
-  let info;
-  try {
-    info = await stat(filePath);
-  } catch {
-    return false;
-  }
-  if (!info.isFile()) return false;
-
-  const source = await readFile(filePath, 'utf8');
-  const html = baseHref ? injectBaseHref(source, baseHref) : source;
-  const body = Buffer.from(html, 'utf8');
-  res.writeHead(200, {
-    'content-type': 'text/html; charset=utf-8',
-    'content-length': body.length,
-    // 前置きパスは接続元によって変わりうるので、共有キャッシュには載せない
-    'cache-control': 'no-cache',
-    'last-modified': info.mtime.toUTCString(),
-  });
-  res.end(body);
-  return true;
+  return stat(filePath)
+    .catch(() => null)
+    .then((info) => {
+      if (!info || !info.isFile()) return false;
+      return readFile(filePath, 'utf8').then((source) => {
+        const html = baseHref ? injectBaseHref(source, baseHref) : source;
+        const body = Buffer.from(html, 'utf8');
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-length': body.length,
+          // 前置きパスは接続元によって変わりうるので、共有キャッシュには載せない
+          'cache-control': 'no-cache',
+          'last-modified': info.mtime.toUTCString(),
+        });
+        res.end(body);
+        return true;
+      });
+    });
 }

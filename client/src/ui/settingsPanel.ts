@@ -220,11 +220,11 @@ export class SettingsPanel {
     onSelect: (value: number) => void,
   ): HTMLElement {
     const select = h('select', { class: 'settings__select' });
-    for (const choice of choices) {
+    choices.forEach((choice) => {
       const option = h('option', { value: String(choice.value), text: choice.label });
       option.selected = choice.value === value;
       select.append(option);
-    }
+    });
     select.addEventListener('change', () => onSelect(Number(select.value)));
     return this.row(label, hint, select);
   }
@@ -272,11 +272,11 @@ export class SettingsPanel {
   private quakeFilterRow(settings: Settings): HTMLElement {
     const filter = settings.quakeFilter;
     const select = h('select', { class: 'settings__select' });
-    for (const choice of MIN_INTENSITY_CHOICES) {
+    MIN_INTENSITY_CHOICES.forEach((choice) => {
       const option = h('option', { value: String(choice.value), text: choice.label });
       option.selected = choice.value === filter.minIntensity;
       select.append(option);
-    }
+    });
     select.addEventListener('change', () => {
       this.deps.onChange({
         quakeFilter: { ...this.deps.getSettings().quakeFilter, minIntensity: Number(select.value) },
@@ -450,11 +450,13 @@ export class SettingsPanel {
     const auto = settings.tsunamiMode === 'auto' && !fixed;
 
     const select = h('select', { class: 'settings__select', multiple: 'multiple' });
-    for (const name of PREFECTURES) {
+    PREFECTURES.forEach((name) => {
       const option = h('option', { value: name, text: name });
-      option.selected = settings.tsunamiAreas.some((area) => area.includes(name) || name.includes(area));
+      option.selected = settings.tsunamiAreas.some(
+        (area) => area.includes(name) || name.includes(area),
+      );
       select.append(option);
-    }
+    });
     select.disabled = auto || fixed;
     const hint = h('span', { class: 'settings__hint' });
     const renderHint = (): void => {
@@ -481,7 +483,9 @@ export class SettingsPanel {
       },
     );
     if (fixed) {
-      for (const input of mode.querySelectorAll('input')) input.disabled = true;
+      mode.querySelectorAll('input').forEach((input) => {
+        input.disabled = true;
+      });
     }
 
     renderHint();

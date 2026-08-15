@@ -41,25 +41,25 @@ export function createHttpServer(
     });
   });
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url ?? '/';
     const path = url.split('?')[0] ?? '/';
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { allow: 'GET, HEAD' }).end();
-      return;
+      return Promise.resolve();
     }
 
     if (path === '/healthz') {
       const health = hub.getHealth();
       // 劣化モードでも P2P が生きていればサービスとしては継続している。
       sendJson(res, health.p2p.ok || !health.degraded ? 200 : 503, health);
-      return;
+      return Promise.resolve();
     }
 
     if (path === '/api/state') {
       sendJson(res, 200, hub.getSnapshot());
-      return;
+      return Promise.resolve();
     }
 
     // 利用地を設定するときの補助。HA に自宅の位置が入っていればそれを返す。
@@ -69,7 +69,7 @@ export function createHttpServer(
       return fetchHomeLocation(config).then((home) => {
         if (!home) {
           res.writeHead(204, { 'cache-control': 'no-store' }).end();
-          return;
+          return Promise.resolve();
         }
         sendJson(res, 200, home);
       });
@@ -78,11 +78,11 @@ export function createHttpServer(
     // 直接アクセス用。サーバーが既定で取っている指標の最新画像を返す。
     if (path === ENDPOINTS.latestFrame) {
       sendImage(res, frames.getLatest(frames.defaultLayer), 'no-store');
-      return;
+      return Promise.resolve();
     }
     if (path === '/kmoni/pswave/latest.gif' || path === '/kmoni/estshindo/latest.gif') {
       sendImage(res, frames.getLatest(path.includes('pswave') ? 'psWave' : 'estShindo'), 'no-store');
-      return;
+      return Promise.resolve();
     }
 
     // 観測画像。端末が選んだ指標をここで受ける。既定以外は普段取っていないので、
@@ -93,37 +93,43 @@ export function createHttpServer(
       const timestamp = frameMatch[2];
       if (!layer || !timestamp) {
         res.writeHead(404, { 'cache-control': 'no-store' }).end();
-        return;
+        return Promise.resolve();
       }
       return frames.requestImage(layer, timestamp).then((image) => {
         sendImage(res, image, 'immutable');
       });
     }
 
-    for (const route of FRAME_ROUTES) {
-      if (!path.startsWith(route.prefix)) continue;
-      const timestamp = path.slice(route.prefix.length).replace(/\.gif$/, '');
-      if (!/^\d{14}$/.test(timestamp)) break;
-      sendImage(res, frames.getImage(route.layer, timestamp), 'immutable');
-      return;
+    const auxRoute = FRAME_ROUTES.find((route) => path.startsWith(route.prefix));
+    if (auxRoute) {
+      const timestamp = path.slice(auxRoute.prefix.length).replace(/\.gif$/, '');
+      if (/^\d{14}$/.test(timestamp)) {
+        sendImage(res, frames.getImage(auxRoute.layer, timestamp), 'immutable');
+        return Promise.resolve();
+      }
     }
 
     // index.html だけは静的配信を通さない。前置きパス付きで公開されている
     // 場合に `<base>` を差し込む必要がある (indexHtml.ts)。
     const isIndex = path === '/' || path === '/index.html';
     const isAppPath = !path.startsWith('/api/') && !path.startsWith('/kmoni/');
-    if (!isIndex && (await serveStatic(staticRoot, path, res))) return;
-
-    // SPA ではないが、キオスクの URL 直打ちに備えて index.html へ寄せる
-    if (isIndex || isAppPath) {
-      if (await serveIndexHtml(staticRoot, ingressBaseHref(req), res)) return;
-    }
-
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not found');
+    return (isIndex ? Promise.resolve(false) : serveStatic(staticRoot, path, res))
+      .then((served) => {
+        if (served) return true;
+        // SPA ではないが、キオスクの URL 直打ちに備えて index.html へ寄せる
+        if (!isIndex && !isAppPath) return false;
+        return serveIndexHtml(staticRoot, ingressBaseHref(req), res);
+      })
+      .then((served) => {
+        if (!served) {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not found');
+        }
+      });
   }
 }
 
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+/** 返すのは現況・死活・座標のいずれかで、どれもただのオブジェクト */
+function sendJson(res: ServerResponse, status: number, payload: object): void {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',

@@ -1,5 +1,6 @@
 import {
   DEFAULT_FLASH_SECONDS,
+  type HomeLocation,
   DEFAULT_SOUND_SECONDS,
   DEFAULT_QUAKE_FILTER,
   DEFAULT_SIDE_WIDTH,
@@ -102,11 +103,10 @@ export class SettingsStore {
 
   /** URL で固定されている項目は無視して更新する */
   update(patch: Partial<Settings>): Settings {
-    const accepted: Partial<Settings> = {};
-    for (const [key, value] of Object.entries(patch) as Array<[keyof Settings, unknown]>) {
-      if (this.urlKeys.has(key as UrlKey)) continue;
-      (accepted as Record<string, unknown>)[key] = value;
-    }
+    // URL で固定されている項目は捨てる (端末の保存値を書き換えない)
+    const accepted = Object.fromEntries(
+      Object.entries(patch).filter(([key]) => !this.urlKeys.has(key as UrlKey)),
+    ) as Partial<Settings>;
     this.stored = { ...this.stored, ...accepted };
     save(this.stored);
     return this.current;
@@ -204,9 +204,9 @@ export function readUrlOverrides(search: string): {
   return { overrides, keys };
 }
 
-function readHome(value: unknown): { lat: number; lon: number } | null {
+function readHome(value: Partial<HomeLocation> | undefined): HomeLocation | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { lat, lon } = value as { lat?: unknown; lon?: unknown };
+  const { lat, lon } = value;
   if (typeof lat !== 'number' || typeof lon !== 'number') return null;
   if (!isLat(lat) || !isLon(lon)) return null;
   return { lat, lon };
@@ -229,22 +229,22 @@ function readSize(value: number | undefined, fallback: number): number {
     : fallback;
 }
 
-function readAreas(value: unknown): string[] | null {
+function readAreas(value: string[] | undefined): string[] | null {
   if (!Array.isArray(value)) return null;
   const areas = value
-    .filter((item): item is string => typeof item === 'string')
+    .filter((item) => typeof item === 'string')
     .map((item) => item.trim())
     .filter((item) => item !== '');
   return areas.length > 0 ? areas : null;
 }
 
-function readView(value: unknown, legacyZoom: number | undefined): MapViewState {
+function readView(value: Partial<MapViewState> | undefined, legacyZoom: number | undefined): MapViewState {
   const fallback = fullMapView();
   if (typeof value !== 'object' || value === null) {
     // 旧形式には表示位置が無い。倍率だけ引き継いで中央に置く。
     return { ...fallback, zoom: clamp(legacyZoom ?? 1, ZOOM_RANGE.min, ZOOM_RANGE.max) };
   }
-  const { centerX, centerY, zoom } = value as Record<string, unknown>;
+  const { centerX, centerY, zoom } = value;
   return {
     centerX: clampNumber(centerX, 0, KMONI_MAP.width, fallback.centerX),
     centerY: clampNumber(centerY, 0, KMONI_MAP.height, fallback.centerY),
@@ -255,7 +255,7 @@ function readView(value: unknown, legacyZoom: number | undefined): MapViewState 
 const isLat = (value: number): boolean => Number.isFinite(value) && value >= -90 && value <= 90;
 const isLon = (value: number): boolean => Number.isFinite(value) && value >= -180 && value <= 180;
 
-function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+function clampNumber(value: number | undefined, min: number, max: number, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.min(Math.max(value, min), max)
     : fallback;

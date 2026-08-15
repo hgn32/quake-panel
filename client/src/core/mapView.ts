@@ -101,15 +101,22 @@ export class MapView {
     this.attachInteraction();
   }
 
-  async init(): Promise<void> {
-    try {
-      await this.basemap.load();
-    } catch (error) {
-      // 背景地図が無くても kmoni 画像だけで成立させる (単体で成立させる方針 §1)
-      console.warn('背景地図の読み込みに失敗しました', error);
-    }
-    this.observeResize();
-    this.resize();
+  init(): Promise<void> {
+    return this.basemap
+      .load()
+      .catch(() => {
+        // 背景地図が無くても kmoni 画像だけで成立させる (単体で成立させる方針 §1)。
+        // 読めたかどうかは isBasemapLoaded() で参照できる。
+      })
+      .then(() => {
+        this.observeResize();
+        this.resize();
+      });
+  }
+
+  /** 背景地図を読めたか (読めていなくても観測点は描ける) */
+  isBasemapLoaded(): boolean {
+    return this.basemap.isLoaded();
   }
 
   /**
@@ -462,7 +469,7 @@ export class MapView {
     const tsunami = this.tsunami;
     if (!tsunami || tsunami.cancelled || tsunami.areas.length === 0) return;
     const pulse = 0.16 + 0.1 * Math.sin(Date.now() / 400);
-    for (const area of tsunami.areas) {
+    tsunami.areas.forEach((area) => {
       const color = tsunamiColor(area.grade);
       this.basemap.fillPrefectures(
         ctx,
@@ -470,7 +477,7 @@ export class MapView {
         area.isHome ? withAlpha(color, 0.22 + pulse) : withAlpha(color, 0.18),
         this.transform,
       );
-    }
+    });
   }
 
   /**
@@ -538,21 +545,25 @@ export class MapView {
     ctx.drawImage(bitmap, 0, 0);
     const src = ctx.getImageData(0, 0, width, height).data;
 
-    // 色の付いている画素を集める (全画素を見るのはここだけ)
+    // 色の付いている画素を集める (全画素を見るのはここだけ)。
+    // RGBA 4 バイトを 1 要素として見られるよう 32bit で読み直すと、
+    // 画素ごとに 1 回の走査で済む (配列を作らないので確保も起きない)。
     const filled = new Uint8Array(width * height);
     const cap = KMONI_CAPTION_BOX;
     const opaque: number[] = [];
-    for (let y = 1; y < height - 1; y += 1) {
-      const row = y * width;
-      const inCaptionRow = y < cap.height;
-      for (let x = 1; x < width - 1; x += 1) {
-        if (src[(row + x) * 4 + 3] === 0) continue;
-        // 左上の見出し帯 (英字と時刻) は観測点ではない
-        if (inCaptionRow && x < cap.width) continue;
-        filled[row + x] = 1;
-        opaque.push(row + x);
-      }
-    }
+    const pixels = new Uint32Array(src.buffer, src.byteOffset, width * height);
+    pixels.forEach((pixel, index) => {
+      // 上位 8bit がアルファ (リトルエンディアン)
+      if ((pixel & 0xff000000) === 0) return;
+      const x = index % width;
+      const y = (index - x) / width;
+      // 外周 1px は塊の判定を単純にするため見ない
+      if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) return;
+      // 左上の見出し帯 (英字と時刻) は観測点ではない
+      if (y < cap.height && x < cap.width) return;
+      filled[index] = 1;
+      opaque.push(index);
+    });
 
     const visited = new Uint8Array(width * height);
     const stack: number[] = [];
@@ -564,8 +575,8 @@ export class MapView {
       points.set(color, list);
     };
 
-    for (const seed of opaque) {
-      if (visited[seed] === 1) continue;
+    opaque.forEach((seed) => {
+      if (visited[seed] === 1) return;
       // ひとつながりの塊を集める
       cells.length = 0;
       stack.length = 0;
@@ -603,19 +614,18 @@ export class MapView {
       }
 
       // 塊の左上を基準に 3px 間隔で拾う (1 つの四角からは 1 点だけ出る)
-      let found = 0;
-      for (const index of cells) {
+      const picked = cells.filter((index) => {
         const x = index % width;
         const y = (index - x) / width;
-        if ((x - minX) % 3 !== 1 || (y - minY) % 3 !== 1) continue;
-        add(index);
-        found += 1;
-      }
-      if (found === 0) {
+        return (x - minX) % 3 === 1 && (y - minY) % 3 === 1;
+      });
+      if (picked.length === 0) {
         // 2x2 以下の小さな四角は格子に乗らない。中心を 1 点だけ置く。
         add(cells[Math.floor(cells.length / 2)] as number);
+      } else {
+        picked.forEach(add);
       }
-    }
+    });
     this.points = points;
     this.pointsFor = bitmap;
     return points;
@@ -646,16 +656,26 @@ export class MapView {
     const { width, height } = this.cssSize;
 
     ctx.save();
-    for (const [color, coords] of points) {
-      ctx.fillStyle = color;
-      for (let i = 0; i < coords.length; i += 2) {
-        const sx = Math.round((coords[i] ?? 0) * scale + offsetX - half);
-        const sy = Math.round((coords[i + 1] ?? 0) * scale + offsetY - half);
+    // 座標は [x0,y0,x1,y1,...] の平坦配列。2 つずつ辿る。
+    const eachPoint = (
+      coords: number[],
+      boxSize: number,
+      offset: number,
+      draw: (sx: number, sy: number) => void,
+    ): void => {
+      Array.from({ length: coords.length / 2 }, (_, i) => i * 2).forEach((i) => {
+        const sx = Math.round((coords[i] ?? 0) * scale + offsetX - offset);
+        const sy = Math.round((coords[i + 1] ?? 0) * scale + offsetY - offset);
         // 画面の外は描かない (拡大時はほとんどが外になる)
-        if (sx + size < 0 || sy + size < 0 || sx > width || sy > height) continue;
-        ctx.fillRect(sx, sy, size, size);
-      }
-    }
+        if (sx + boxSize < 0 || sy + boxSize < 0 || sx > width || sy > height) return;
+        draw(sx, sy);
+      });
+    };
+
+    points.forEach((coords, color) => {
+      ctx.fillStyle = color;
+      eachPoint(coords, size, half, (sx, sy) => ctx.fillRect(sx, sy, size, size));
+    });
     if (this.options.glow) {
       // 少し大きい四角を薄く重ねて発光させる。にじませるより軽い。
       // 日本全体を写しているときは観測点が密で、強くすると重なって白く潰れる。
@@ -664,15 +684,12 @@ export class MapView {
       ctx.globalAlpha = Math.min(0.3, 0.02 * scale);
       const glowSize = size + 4;
       const glowHalf = glowSize / 2;
-      for (const [color, coords] of points) {
+      points.forEach((coords, color) => {
         ctx.fillStyle = color;
-        for (let i = 0; i < coords.length; i += 2) {
-          const sx = Math.round((coords[i] ?? 0) * scale + offsetX - glowHalf);
-          const sy = Math.round((coords[i + 1] ?? 0) * scale + offsetY - glowHalf);
-          if (sx + glowSize < 0 || sy + glowSize < 0 || sx > width || sy > height) continue;
-          ctx.fillRect(sx, sy, glowSize, glowSize);
-        }
-      }
+        eachPoint(coords, glowSize, glowHalf, (sx, sy) =>
+          ctx.fillRect(sx, sy, glowSize, glowSize),
+        );
+      });
     }
     ctx.restore();
   }
