@@ -172,6 +172,8 @@ body.cursor-hidden * {
   display: block;
   width: 100%;
   height: 100%;
+  /* 指の操作はこちらで扱う (ブラウザのスクロール/ズームに取られない) */
+  touch-action: none;
 }
 
 .map-credit {
@@ -954,5 +956,145 @@ body.cursor-hidden * {
   .settings__text {
     width: 100%;
     min-width: 0;
+  }
+}
+
+/* ---------- スマホ (狭い画面・縦向き) ---------- */
+
+@media (max-width: 700px) {
+  /* 見出しは縦に潰れて読めなくなるだけなので出さない。
+     時計と状態表示を 2 段にして、チップが 3 段に折り返すのを防ぐ。 */
+  .topbar {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .topbar__title {
+    display: none;
+  }
+
+  .clock {
+    font-size: 30px;
+  }
+
+  .clock__date {
+    font-size: 11px;
+  }
+
+  .topbar__clock {
+    gap: 6px;
+  }
+
+  /* 入りきらないチップは折り返す (右端で切れるのを防ぐ) */
+  .topbar__status {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .chip {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+
+  .icon-button {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  /* 地図の上の重なりもの: 凡例をクレジットの上へ逃がす */
+  .map-credit {
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+
+  .map-legend {
+    right: 6px;
+    bottom: 34px;
+    padding: 4px 6px;
+  }
+
+  .map-legend__bar {
+    width: 96px;
+    height: 8px;
+  }
+
+  .map-legend__title,
+  .map-legend__end {
+    font-size: 10px;
+  }
+
+  .map-controls {
+    top: 8px;
+    right: 6px;
+    gap: 4px;
+    padding: 4px 5px;
+  }
+
+  .map-controls__button {
+    min-width: 26px;
+    padding: 3px 6px;
+    font-size: 13px;
+  }
+
+  .map-controls__button--wide {
+    font-size: 11px;
+  }
+
+  .map-controls__value {
+    min-width: 34px;
+    font-size: 11px;
+  }
+
+  .map-pick {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100% - 16px);
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  /* 主役は地図なので、履歴は画面の半分未満に留める (中はスクロールできる) */
+  .side {
+    max-height: 45vh;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .panel {
+    padding: 10px 12px;
+  }
+
+  /* EEW の大型表示は幅に収める */
+  .eew__main {
+    gap: 10px;
+  }
+
+  .eew__intensity {
+    min-width: 84px;
+    padding: 6px 8px;
+  }
+
+  .eew__intensity-value {
+    font-size: 40px;
+  }
+
+  .eew__place {
+    font-size: 20px;
+  }
+
+  .fact__value {
+    font-size: 16px;
+  }
+
+  .quake-list__place {
+    font-size: 14px;
+  }
+
+  .quake-list__meta {
+    font-size: 11px;
   }
 }
