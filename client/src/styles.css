@@ -1076,6 +1076,20 @@ body.cursor-hidden * {
   .settings__row {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
+    /*
+     * 1 列になると、素の <select> や <button> がグリッド項目の既定 (stretch) で
+     * 列いっぱいに伸びてしまう (「10秒」の選択が画面幅いっぱいになる)。
+     * 中身なりの幅に戻す。
+     */
+    justify-items: start;
+  }
+
+  /* ラベルと操作部の入れ物だけは列幅いっぱい使う。
+     縮めると説明文が細長い柱になって読めなくなる。 */
+  .settings__label,
+  .settings__options,
+  .settings__stack {
+    width: 100%;
   }
 
   .settings__options,
@@ -1084,6 +1098,7 @@ body.cursor-hidden * {
     align-items: flex-start;
   }
 
+  /* 逆に、幅いっぱいの方が使いやすいものは明示的に伸ばす */
   .settings select[multiple],
   .settings__text {
     width: 100%;

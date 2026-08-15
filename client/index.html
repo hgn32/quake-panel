@@ -46,9 +46,10 @@
 
           <!-- 地図の操作。設定画面ではなく地図の上に置く (何が動くか分かるように) -->
           <div id="map-controls" class="map-controls">
-            <button id="map-zoom-in" class="map-controls__button" type="button" title="拡大">＋</button>
-            <span id="map-zoom-value" class="map-controls__value">1.0x</span>
+            <!-- 倍率の目盛りと同じ向きに並べる (左が縮小・右が拡大) -->
             <button id="map-zoom-out" class="map-controls__button" type="button" title="縮小">−</button>
+            <span id="map-zoom-value" class="map-controls__value">1.0x</span>
+            <button id="map-zoom-in" class="map-controls__button" type="button" title="拡大">＋</button>
             <button id="map-view-japan" class="map-controls__button map-controls__button--wide" type="button">日本全体</button>
             <button id="map-view-home" class="map-controls__button map-controls__button--wide" type="button">利用地</button>
           </div>
