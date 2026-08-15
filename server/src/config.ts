@@ -1,4 +1,12 @@
-import { DEFAULT_KMONI_LAYER, parseKmoniLayer, type KmoniLayer } from '@quake-panel/shared';
+import {
+  DEFAULT_HA_NOTIFY_FILTER,
+  DEFAULT_KMONI_LAYER,
+  parseKmoniLayer,
+  parseMinIntensity,
+  parsePrefectureList,
+  type HaNotifyFilter,
+  type KmoniLayer,
+} from '@quake-panel/shared';
 
 const num = (value: string | undefined, fallback: number): number => {
   if (value === undefined || value.trim() === '') return fallback;
@@ -72,6 +80,12 @@ export interface Config {
      * 自宅位置の取得 (`/api/home-location`) はこの設定に関係なく使える。
      */
     notify: boolean;
+    /**
+     * 通知する地震の絞り込み。
+     * パネルの表示は端末ごとに絞れるが、HA への通知はサーバーが 1 か所で出すので
+     * ここで決める (自動化を全国の小さな地震で走らせないため)。
+     */
+    filter: HaNotifyFilter;
     /** States API で作った状態は HA 再起動で消えるので入れ直す間隔 */
     refreshMs: number;
     timeoutMs: number;
@@ -112,6 +126,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       apiUrl: str(env['HA_API_URL'], ''),
       token: str(env['SUPERVISOR_TOKEN'], ''),
       notify: bool(env['HA_NOTIFY'], true),
+      filter: {
+        minIntensity:
+          parseMinIntensity(env['HA_NOTIFY_MIN_INTENSITY']) ?? DEFAULT_HA_NOTIFY_FILTER.minIntensity,
+        prefectures: parsePrefectureList(str(env['HA_NOTIFY_PREFECTURES'], '')),
+      },
       refreshMs: num(env['HA_STATE_REFRESH_MS'], 60_000),
       timeoutMs: num(env['HA_REQUEST_TIMEOUT_MS'], 4000),
     },
