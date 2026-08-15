@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
+import { ENDPOINTS } from '@quake-panel/shared';
 import type { Config } from '../config.js';
+import { fetchHomeLocation } from '../haLocation.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
 import type { FrameLayer, KmoniFrameWorker } from '../sources/kmoniFrames.js';
@@ -61,6 +63,19 @@ export function createHttpServer(
     if (path === '/api/state') {
       sendJson(res, 200, hub.getSnapshot());
       return;
+    }
+
+    // 利用地を設定するときの補助。HA に自宅の位置が入っていればそれを返す。
+    // 素の HTTP ではブラウザの位置情報 API が使えないため、キオスク端末では
+    // これが唯一の自動取得手段になる。
+    if (path === ENDPOINTS.homeLocation) {
+      return fetchHomeLocation(config).then((home) => {
+        if (!home) {
+          res.writeHead(204, { 'cache-control': 'no-store' }).end();
+          return;
+        }
+        sendJson(res, 200, home);
+      });
     }
 
     const latestLayer = LATEST_ROUTES[path];

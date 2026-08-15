@@ -1,3 +1,4 @@
+export * from './homeLocation.js';
 export * from './intensity.js';
 export * from './kmoniGeo.js';
 export * from './models.js';

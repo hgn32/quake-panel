@@ -1,3 +1,4 @@
+import { geolocationErrorMessage, type HomeLocation } from '@quake-panel/shared';
 import type { Settings, UrlKey } from '../settings.js';
 import { h, replaceChildren } from './dom.js';
 
@@ -26,6 +27,12 @@ export interface SettingsPanelDeps {
   onTest: () => void;
   /** 地図をクリックして利用地を選ぶモードに入る */
   onPickHome: () => void;
+  /** ブラウザの位置情報が使えるか (HTTPS でないと使えないのでボタンごと隠す) */
+  canUseCurrentLocation: () => boolean;
+  /** その端末の現在地 */
+  requestCurrentLocation: () => Promise<HomeLocation>;
+  /** Home Assistant に設定されている自宅の位置 (未設定なら null) */
+  requestHomeAssistantLocation: () => Promise<HomeLocation | null>;
   /** 自動設定のときに、いま効いている予報区を見せるために使う */
   describeTsunamiAreas: () => string;
 }
@@ -126,7 +133,13 @@ export class SettingsPanel {
     );
   }
 
-  /** 利用地。数値の直接入力と、地図から選ぶ方法の両方を用意する。 */
+  /**
+   * 利用地。
+   *
+   * 決め方は 4 つ (直接入力 / 地図をクリック / 現在地 / HA の自宅位置)。
+   * 自動取得はどれも「入力欄へ入れる」までで、確定は「保存」に任せる
+   * (取消で開いた時点へ戻せる)。
+   */
   private homeRow(settings: Settings): HTMLElement {
     const fixed = this.deps.isFixedByUrl('home');
     const lat = this.coordInput(settings.home.lat, -90, 90, fixed, (value) =>
@@ -140,19 +153,99 @@ export class SettingsPanel {
       this.deps.onPickHome();
     });
     pick.disabled = fixed;
-    return this.row(
-      '利用地',
-      fixed
-        ? 'URL で指定されているため変更できません。'
-        : '地図の中心と、地震情報の履歴で自分の県を前に出すのに使います。',
-      h(
-        'div',
-        { class: 'settings__options' },
-        h('label', { class: 'settings__coord' }, h('span', { text: '緯度' }), lat),
-        h('label', { class: 'settings__coord' }, h('span', { text: '経度' }), lon),
-        pick,
+
+    const status = h('span', { class: 'settings__hint' });
+    const fill = (home: HomeLocation): void => {
+      lat.value = home.lat.toFixed(4);
+      lon.value = home.lon.toFixed(4);
+      this.deps.onChange({ home });
+      status.textContent =
+        `${home.lat.toFixed(4)}, ${home.lon.toFixed(4)} にしました。` +
+        '「保存」で確定、「取消」で元に戻ります。';
+    };
+
+    const buttons: HTMLElement[] = [pick];
+    if (this.deps.canUseCurrentLocation()) {
+      buttons.push(
+        this.loadButton('現在地を取得', fixed, status, () => this.deps.requestCurrentLocation(), fill, (error) =>
+          // 位置情報 API のエラーは code で理由が分かる
+          geolocationErrorMessage(typeof error.code === 'number' ? error.code : null),
+        ),
+      );
+    }
+    buttons.push(
+      this.loadButton(
+        'HA の自宅位置を使う',
+        fixed,
+        status,
+        () => this.deps.requestHomeAssistantLocation(),
+        fill,
+        () => 'Home Assistant から自宅の位置を取得できませんでした。',
+        'Home Assistant に自宅の位置が設定されていません。',
       ),
     );
+
+    return h(
+      'div',
+      { class: 'settings__row' },
+      h(
+        'div',
+        { class: 'settings__label' },
+        h('span', { text: '利用地' }),
+        h('span', {
+          class: 'settings__hint',
+          text: fixed
+            ? 'URL で指定されているため変更できません。'
+            : '地図の中心と、地震情報の履歴で自分の県を前に出すのに使います。',
+        }),
+        status,
+      ),
+      h(
+        'div',
+        { class: 'settings__stack' },
+        h(
+          'div',
+          { class: 'settings__options' },
+          h('label', { class: 'settings__coord' }, h('span', { text: '緯度' }), lat),
+          h('label', { class: 'settings__coord' }, h('span', { text: '経度' }), lon),
+        ),
+        h('div', { class: 'settings__options' }, ...buttons),
+      ),
+    );
+  }
+
+  /**
+   * 押すと非同期に値を取りに行くボタン。
+   *
+   * 取得中は押せなくし、結果 (成功・失敗・未設定) は必ず文言で返す。
+   * 押しても何も起きないように見えるのが一番困るため。
+   */
+  private loadButton(
+    label: string,
+    fixed: boolean,
+    status: HTMLElement,
+    load: () => Promise<HomeLocation | null>,
+    onLoaded: (home: HomeLocation) => void,
+    describeError: (error: { code?: number }) => string,
+    emptyMessage = '取得できませんでした。',
+  ): HTMLButtonElement {
+    const button = this.button(label, () => {
+      button.disabled = true;
+      status.textContent = `${label}…`;
+      load()
+        .then((home) => {
+          if (home) onLoaded(home);
+          else status.textContent = emptyMessage;
+        })
+        .catch((error: { code?: number }) => {
+          status.textContent = describeError(error);
+        })
+        .finally(() => {
+          button.disabled = fixed;
+        });
+    });
+    button.disabled = fixed;
+    return button;
   }
 
   /**

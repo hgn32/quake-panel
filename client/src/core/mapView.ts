@@ -571,8 +571,9 @@ export class MapView {
       stack.length = 0;
       stack.push(seed);
       visited[seed] = 1;
-      let minX = width;
-      let minY = height;
+      // KMONI_MAP の幅と高さはリテラル型なので、代入できるよう number にしておく
+      let minX: number = width;
+      let minY: number = height;
       while (stack.length > 0) {
         const index = stack.pop() as number;
         cells.push(index);

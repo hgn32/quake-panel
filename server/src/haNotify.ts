@@ -50,7 +50,8 @@ export class HomeAssistantNotifier {
   ) {}
 
   get enabled(): boolean {
-    return this.config.homeAssistant.apiUrl !== '' && this.config.homeAssistant.token !== '';
+    const ha = this.config.homeAssistant;
+    return ha.notify && ha.apiUrl !== '' && ha.token !== '';
   }
 
   start(): void {

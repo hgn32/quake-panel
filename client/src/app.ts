@@ -13,6 +13,11 @@ import { AlertPresenter } from './core/alert.js';
 import { ServerConnection, type ConnectionState } from './core/connection.js';
 import { FrameStream } from './core/frameStream.js';
 import {
+  canUseBrowserLocation,
+  fetchHomeAssistantLocation,
+  requestBrowserLocation,
+} from './core/homeLocation.js';
+import {
   MapView,
   ZOOM_RANGE,
   fullMapView,
@@ -117,6 +122,9 @@ export class App {
       onChange: (patch) => this.applySettings(patch),
       onTest: () => this.runAlertTest(),
       onPickHome: () => this.startHomePick(),
+      canUseCurrentLocation: () => canUseBrowserLocation(),
+      requestCurrentLocation: () => requestBrowserLocation(),
+      requestHomeAssistantLocation: () => fetchHomeAssistantLocation(),
       describeTsunamiAreas: () => {
         const areas = this.homeAreas();
         return areas.length > 0 ? areas.join('、') : '(利用地の県が分からないため無し)';
