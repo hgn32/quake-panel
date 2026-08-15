@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_QUAKE_FILTER,
   clampFlashSeconds,
+  clampSoundSeconds,
   matchesQuakeFilter,
   parseKmoniLayer,
 } from '../dist/index.js';
@@ -68,6 +69,16 @@ describe('強震モニタの指標', () => {
     assert.equal(parseKmoniLayer(undefined), null);
     // 地中 (_b) は地表と同じ地点なので選択肢に無い
     assert.equal(parseKmoniLayer('jma_b'), null);
+  });
+});
+
+describe('音を鳴らす時間', () => {
+  it('範囲外は丸め、0 (鳴らし切る) は保つ', () => {
+    assert.equal(clampSoundSeconds(10), 10);
+    assert.equal(clampSoundSeconds(0), 0);
+    assert.equal(clampSoundSeconds(-3), 0);
+    assert.equal(clampSoundSeconds(9999), 120);
+    assert.equal(clampSoundSeconds(Number.NaN), 10);
   });
 });
 

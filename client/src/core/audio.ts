@@ -1,4 +1,4 @@
-import { ALERT_SOUND_SECONDS } from '@quake-panel/shared';
+import { DEFAULT_SOUND_SECONDS } from '@quake-panel/shared';
 
 /**
  * 通知音。
@@ -62,8 +62,10 @@ export class AlertAudio {
   private master: GainNode | null = null;
   private volume = 0.7;
   private active: AudioScheduledSourceNode[] = [];
-  /** 鳴り始めてから ALERT_SOUND_SECONDS で黙らせるためのタイマー */
+  /** 鳴り始めてから maxSeconds で黙らせるためのタイマー */
   private silenceTimer: number | null = null;
+  /** 鳴らし続ける上限 (秒)。0 ならパターンどおり鳴らし切る。 */
+  private maxSeconds = DEFAULT_SOUND_SECONDS;
 
   get isUnlocked(): boolean {
     return this.context !== null && this.context.state === 'running';
@@ -87,6 +89,11 @@ export class AlertAudio {
     }
   }
 
+  /** 端末ごとの設定から上限を受け取る */
+  setMaxSeconds(seconds: number): void {
+    this.maxSeconds = seconds;
+  }
+
   setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, volume));
     if (this.master) this.master.gain.value = this.volume;
@@ -104,8 +111,8 @@ export class AlertAudio {
   /**
    * 鳴らす。
    *
-   * 気づかせるのが目的なので、鳴り続ける必要はない。**最初の
-   * ALERT_SOUND_SECONDS 秒**を超える分は鳴らさず、超えた時点で黙らせる。
+   * 気づかせるのが目的なので、鳴り続ける必要はない。**最初の maxSeconds 秒**を
+   * 超える分は鳴らさず、超えた時点で黙らせる (既定 10 秒、設定で変更可)。
    * 遠方の地震で長時間鳴り続けた、という実際の指摘に対する打ち切り。
    */
   play(sound: AlertSound, repeatOverride?: number): void {
@@ -116,7 +123,7 @@ export class AlertAudio {
     const pattern = PATTERNS[sound];
     const repeat = repeatOverride ?? pattern.repeat;
     const base = ctx.currentTime + 0.02;
-    const deadline = base + ALERT_SOUND_SECONDS;
+    const deadline = this.maxSeconds > 0 ? base + this.maxSeconds : Number.POSITIVE_INFINITY;
 
     for (let r = 0; r < repeat; r += 1) {
       const cycleStart = base + r * pattern.interval;
@@ -143,10 +150,12 @@ export class AlertAudio {
 
     // 予定より長引いた場合 (連続で鳴らされた場合を含む) の保険
     if (this.silenceTimer !== null) window.clearTimeout(this.silenceTimer);
-    this.silenceTimer = window.setTimeout(() => {
-      this.silenceTimer = null;
-      this.stop();
-    }, ALERT_SOUND_SECONDS * 1000);
+    if (this.maxSeconds > 0) {
+      this.silenceTimer = window.setTimeout(() => {
+        this.silenceTimer = null;
+        this.stop();
+      }, this.maxSeconds * 1000);
+    }
   }
 
   /** キャンセル報などで即座に黙らせる */

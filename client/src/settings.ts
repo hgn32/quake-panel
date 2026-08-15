@@ -1,10 +1,12 @@
 import {
   DEFAULT_FLASH_SECONDS,
+  DEFAULT_SOUND_SECONDS,
   DEFAULT_QUAKE_FILTER,
   DEFAULT_SIDE_WIDTH,
   HOME_LOCATION,
   KMONI_MAP,
   clampFlashSeconds,
+  clampSoundSeconds,
   parseKmoniLayer,
   type KmoniLayer,
   type QuakeFilter,
@@ -42,6 +44,8 @@ export interface Settings {
   locked: boolean;
   /** 表示する強震モニタの指標。null はサーバーの既定に従う */
   layer: KmoniLayer | null;
+  /** 音を鳴らす上限 (秒)。0 ならパターンどおり鳴らし切る */
+  soundSeconds: number;
   /** 明滅を続ける上限 (秒)。0 なら止めない */
   flashSeconds: number;
   /** 地震情報の絞り込み */
@@ -66,6 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sideHeight: 0,
   locked: false,
   layer: null,
+  soundSeconds: DEFAULT_SOUND_SECONDS,
   flashSeconds: DEFAULT_FLASH_SECONDS,
   quakeFilter: { ...DEFAULT_QUAKE_FILTER },
 };
@@ -144,6 +149,7 @@ function readStored(storage: Storage | null): Settings {
       sideHeight: readSize(parsed.sideHeight, DEFAULT_SETTINGS.sideHeight),
       locked: parsed.locked ?? DEFAULT_SETTINGS.locked,
       layer: parseKmoniLayer(parsed.layer),
+      soundSeconds: clampSoundSeconds(parsed.soundSeconds ?? DEFAULT_SETTINGS.soundSeconds),
       flashSeconds: clampFlashSeconds(parsed.flashSeconds ?? DEFAULT_SETTINGS.flashSeconds),
       quakeFilter: readFilter(parsed.quakeFilter),
     };
