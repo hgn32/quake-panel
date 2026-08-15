@@ -110,12 +110,13 @@ export class QuakeList {
         text: 'この発表には各地の震度がまだ含まれていません (続報で入ります)。',
       });
     }
+    // 震度ごとにまとめる (同じ震度の地名を 1 行に並べるため)
     const byScale = new Map<number | null, string[]>();
-    for (const point of quake.points) {
+    quake.points.forEach((point) => {
       const names = byScale.get(point.scale) ?? [];
       names.push(point.addr);
       byScale.set(point.scale, names);
-    }
+    });
     const rows = [...byScale.entries()]
       .sort((a, b) => (b[0] ?? -1) - (a[0] ?? -1))
       .map(([scale, names]) => {

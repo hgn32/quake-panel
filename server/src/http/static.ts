@@ -20,7 +20,7 @@ const MIME: Record<string, string> = {
  * クライアントのビルド成果物を配る。
  * ハッシュ付きファイル名 (Vite の既定) は長期キャッシュ、それ以外は都度検証にする。
  */
-export async function serveStatic(
+export function serveStatic(
   rootDir: string,
   urlPath: string,
   res: ServerResponse,
@@ -29,29 +29,27 @@ export async function serveStatic(
   const decoded = decodeURIComponent(urlPath.split('?')[0] ?? '/');
   const relative = normalize(decoded === '/' ? '/index.html' : decoded).replace(/^(\.\.[/\\])+/, '');
   const filePath = join(root, relative);
-  if (filePath !== root && !filePath.startsWith(root + sep)) return false;
+  // 上位ディレクトリへ抜ける経路は配らない
+  if (filePath !== root && !filePath.startsWith(root + sep)) return Promise.resolve(false);
 
-  let info;
-  try {
-    info = await stat(filePath);
-  } catch {
-    return false;
-  }
-  if (!info.isFile()) return false;
+  return stat(filePath)
+    .catch(() => null)
+    .then((info) => {
+      if (!info || !info.isFile()) return false;
 
-  const ext = extname(filePath).toLowerCase();
-  const hashed = /-[A-Za-z0-9_]{8,}\.(js|css|woff2)$/.test(filePath);
-  res.writeHead(200, {
-    'content-type': MIME[ext] ?? 'application/octet-stream',
-    'content-length': info.size,
-    'cache-control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
-    'last-modified': info.mtime.toUTCString(),
-  });
-  await new Promise<void>((resolvePromise, reject) => {
-    const stream = createReadStream(filePath);
-    stream.on('error', reject);
-    stream.on('end', () => resolvePromise());
-    stream.pipe(res);
-  });
-  return true;
+      const ext = extname(filePath).toLowerCase();
+      const hashed = /-[A-Za-z0-9_]{8,}\.(js|css|woff2)$/.test(filePath);
+      res.writeHead(200, {
+        'content-type': MIME[ext] ?? 'application/octet-stream',
+        'content-length': info.size,
+        'cache-control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
+        'last-modified': info.mtime.toUTCString(),
+      });
+      return new Promise<boolean>((resolvePromise, reject) => {
+        const stream = createReadStream(filePath);
+        stream.on('error', reject);
+        stream.on('end', () => resolvePromise(true));
+        stream.pipe(res);
+      });
+    });
 }

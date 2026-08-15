@@ -112,6 +112,23 @@ Ingress 経由で開くと HA のログイン (入場制限) がそのまま利�
 開きたいので、アドオンは LAN 向けに直接ポートも開ける
 (インターネットへ素で公開しないこと、という条件は変わらない)。
 
+### コーディング規約
+
+`.claude/instructions/typescript.instructions.md` の規約に全面的に合わせてある。
+
+| 規約 | この実装での扱い |
+|---|---|
+| `for` 禁止 | `forEach` / `filter` / `map` / `Array.from` に置き換え。塊の探索 (flood fill) だけは `while` (スタックが空になるまで回す性質のため) |
+| `await` 禁止 | すべて `Promise` の連鎖。逐次実行が要る所は `reduce` で鎖にする (`haNotify.pushRound`) |
+| `any` / `unknown` 禁止 | JSON 由来の値は `JsonValue` (`shared/src/homeLocation.ts`) で受ける。例外は `describeError(error: Error)` に `as Error` で渡す |
+| `console.log` 禁止 | サーバーのログは `process.stdout.write` / `process.stderr.write` (`server/src/logger.ts`)。クライアントは何も出さない |
+| `!` 禁止 | 使っていない。`?? 0` や `null` チェックで処理する |
+
+毎秒動く観測点の抽出 (`client/src/core/mapView.ts`) は `for` を外すと約 2 倍
+遅くなる (実測 1.1ms → 2.2ms / フレーム、抽出点数は 1331 で同じ)。毎秒 1 回の
+処理なので許容し、画素の走査は `Uint32Array` で 1 画素 1 要素にして
+`forEach` する形にしてある (配列を作らないので確保が起きない)。
+
 ### 開発
 
 ```bash

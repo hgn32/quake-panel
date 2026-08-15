@@ -9,7 +9,7 @@ import {
 import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
-import { fetchBinary } from './httpClient.js';
+import { fetchBinary, type BinaryResponse } from './httpClient.js';
 import type { KmoniClock } from './kmoniClock.js';
 
 const log = createLogger('kmoni-frames');
@@ -26,6 +26,9 @@ const MAX_EXTRA_LAG_SEC = 6;
  * それ以外は「実際に見ている端末があるときだけ」取りに行く。
  */
 export type FrameLayer = KmoniLayer | 'psWave' | 'estShindo';
+
+/** 取得できた画像 (取得できなければ null) */
+type BinaryFrame = BinaryResponse;
 
 /** 端末から要求された指標を、何秒間「見られている」とみなすか */
 const LAYER_ACTIVE_MS = 60_000;
@@ -158,35 +161,38 @@ export class KmoniFrameWorker {
     this.timer.unref?.();
   }
 
-  private async tick(): Promise<void> {
+  private tick(): Promise<void> {
     if (this.running) {
       this.schedule(this.interval());
-      return;
+      return Promise.resolve();
     }
     this.running = true;
     const startedAt = Date.now();
-    try {
-      await this.fetchOnce();
-    } catch (error) {
-      this.hub.markFailure('kmoniImage', describeError(error));
-      log.warn(`frame fetch failed: ${describeError(error)}`);
-    } finally {
-      this.running = false;
-      // 取得に掛かった時間を差し引いて、実効的な取得間隔を一定に保つ。
-      const elapsed = Date.now() - startedAt;
-      this.schedule(Math.max(100, this.interval() - elapsed));
-    }
+    return this.fetchOnce()
+      .catch((error: Error) => {
+        this.hub.markFailure('kmoniImage', describeError(error));
+        log.warn(`frame fetch failed: ${describeError(error)}`);
+      })
+      .then(() => {
+        this.running = false;
+        // 取得に掛かった時間を差し引いて、実効的な取得間隔を一定に保つ。
+        const elapsed = Date.now() - startedAt;
+        this.schedule(Math.max(100, this.interval() - elapsed));
+      });
   }
 
-  private async fetchOnce(): Promise<void> {
+  private fetchOnce(): Promise<void> {
     const target = new Date(this.clock.latestAvailable().getTime() - this.extraLagSec * 1000);
     const timestamp = toKmoniTimestamp(target);
-    if (timestamp === this.lastTimestamp) return;
+    if (timestamp === this.lastTimestamp) return Promise.resolve();
 
-    const realtime = await fetchBinary(this.frameUrl(this.config.kmoni.layer, timestamp), {
+    return fetchBinary(this.frameUrl(this.config.kmoni.layer, timestamp), {
       timeoutMs: this.config.kmoni.requestTimeoutMs,
-    });
+    }).then((realtime) => this.acceptFrame(timestamp, realtime));
+  }
 
+  /** 取得できた本体フレームを取り込み、補助レイヤを揃えてから通知する */
+  private acceptFrame(timestamp: string, realtime: BinaryFrame | null): Promise<void> {
     if (!realtime) {
       // まだ生成されていない。1 秒ずつ遡って追従する (端末時計のズレもここで吸収される)。
       this.successStreak = 0;
@@ -196,7 +202,7 @@ export class KmoniFrameWorker {
       } else {
         this.hub.markFailure('kmoniImage', `frame ${timestamp} not found`);
       }
-      return;
+      return Promise.resolve();
     }
 
     // 余裕を取りすぎた分は少しずつ戻して、表示の遅れを最小に保つ。
@@ -210,22 +216,23 @@ export class KmoniFrameWorker {
     this.store(this.config.kmoni.layer, timestamp, realtime.body, realtime.contentType);
 
     // 既定以外の指標を見ている端末がいれば、その分も同じ時刻で揃えておく
-    await Promise.all(
+    const extras = Promise.all(
       this.activeLayers()
         .filter((layer) => layer !== this.config.kmoni.layer)
         .map((layer) => this.fetchLayer(layer, timestamp)),
     );
+    // 補助レイヤ (予測円・予想震度) は EEW 発表中だけ生成される
+    const aux = this.eewActive
+      ? Promise.all([this.tryFetch('psWave', timestamp), this.tryFetch('estShindo', timestamp)])
+      : Promise.resolve([false, false] as [boolean, boolean]);
 
-    const layers = { realtime: true, psWave: false, estShindo: false };
-    if (this.eewActive) {
-      const [ps, est] = await Promise.all([
-        this.tryFetch('psWave', timestamp),
-        this.tryFetch('estShindo', timestamp),
-      ]);
-      layers.psWave = ps;
-      layers.estShindo = est;
-    }
+    return Promise.all([extras, aux]).then(([, [psWave, estShindo]]) =>
+      this.publishFrame(timestamp, { realtime: true, psWave, estShindo }),
+    );
+  }
 
+  /** フレームの取り込みが済んだことをクライアントへ知らせる */
+  private publishFrame(timestamp: string, layers: FrameNotice['layers']): void {
     this.lastTimestamp = timestamp;
     this.hub.markSuccess('kmoniImage');
     this.prune();
@@ -240,18 +247,19 @@ export class KmoniFrameWorker {
     this.hub.publishFrame(notice);
   }
 
-  private async tryFetch(layer: 'psWave' | 'estShindo', timestamp: string): Promise<boolean> {
-    try {
-      const url = layer === 'psWave' ? this.psWaveUrl(timestamp) : this.estShindoUrl(timestamp);
-      const res = await fetchBinary(url, { timeoutMs: this.config.kmoni.requestTimeoutMs });
-      if (!res) return false;
-      this.store(layer, timestamp, res.body, res.contentType);
-      return true;
-    } catch (error) {
-      // 補助レイヤの欠落は本体表示を止める理由にならないので握りつぶす。
-      log.debug(`${layer} fetch failed: ${describeError(error)}`);
-      return false;
-    }
+  private tryFetch(layer: 'psWave' | 'estShindo', timestamp: string): Promise<boolean> {
+    const url = layer === 'psWave' ? this.psWaveUrl(timestamp) : this.estShindoUrl(timestamp);
+    return fetchBinary(url, { timeoutMs: this.config.kmoni.requestTimeoutMs })
+      .then((res) => {
+        if (!res) return false;
+        this.store(layer, timestamp, res.body, res.contentType);
+        return true;
+      })
+      .catch((error: Error) => {
+        // 補助レイヤの欠落は本体表示を止める理由にならないので握りつぶす。
+        log.debug(`${layer} fetch failed: ${describeError(error)}`);
+        return false;
+      });
   }
 
   private store(layer: FrameLayer, timestamp: string, body: Buffer, contentType: string): void {
@@ -268,7 +276,7 @@ export class KmoniFrameWorker {
     const limit = this.config.kmoni.frameCacheSize * 3;
     if (this.cache.size <= limit) return;
     const keys = [...this.cache.keys()];
-    for (const key of keys.slice(0, this.cache.size - limit)) this.cache.delete(key);
+    keys.slice(0, this.cache.size - limit).forEach((key) => this.cache.delete(key));
   }
 
   private frameUrl(layer: KmoniLayer, timestamp: string): string {

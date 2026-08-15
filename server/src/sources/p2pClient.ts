@@ -43,27 +43,33 @@ export class P2PClient {
   }
 
   /** 起動直後に画面が空にならないよう、直近の地震情報と津波予報を取り込む。 */
-  async seedHistory(): Promise<void> {
+  seedHistory(): Promise<void> {
     const now = new Date();
-    try {
-      const quakes = await fetchJson<P2PQuake[]>(
-        `${this.config.p2p.historyUrl}?codes=551&limit=${this.config.quakeHistorySize}`,
-        { timeoutMs: 8000 },
-      );
-      this.hub.seedQuakes(quakes.map((q) => parseQuake(q, now)));
-      log.info(`seeded ${quakes.length} quake records`);
-    } catch (error) {
-      log.warn(`quake history seed failed: ${describeError(error)}`);
-    }
-    try {
-      const tsunami = await fetchJson<P2PTsunami[]>(`${this.config.p2p.historyUrl}?codes=552&limit=1`, {
-        timeoutMs: 8000,
+    // 片方が失敗しても、もう片方は取り込む (どちらも起動を止める理由にはしない)
+    const quakes = fetchJson<P2PQuake[]>(
+      `${this.config.p2p.historyUrl}?codes=551&limit=${this.config.quakeHistorySize}`,
+      { timeoutMs: 8000 },
+    )
+      .then((list) => {
+        this.hub.seedQuakes(list.map((q) => parseQuake(q, now)));
+        log.info(`seeded ${list.length} quake records`);
+      })
+      .catch((error: Error) => {
+        log.warn(`quake history seed failed: ${describeError(error)}`);
       });
-      const latest = tsunami[0];
-      if (latest) this.hub.seedTsunami(parseTsunami(latest, now));
-    } catch (error) {
-      log.warn(`tsunami history seed failed: ${describeError(error)}`);
-    }
+
+    const tsunami = fetchJson<P2PTsunami[]>(`${this.config.p2p.historyUrl}?codes=552&limit=1`, {
+      timeoutMs: 8000,
+    })
+      .then((list) => {
+        const latest = list[0];
+        if (latest) this.hub.seedTsunami(parseTsunami(latest, now));
+      })
+      .catch((error: Error) => {
+        log.warn(`tsunami history seed failed: ${describeError(error)}`);
+      });
+
+    return Promise.all([quakes, tsunami]).then(() => undefined);
   }
 
   private connect(): void {
@@ -88,7 +94,7 @@ export class P2PClient {
       try {
         this.handle(String(data));
       } catch (error) {
-        log.warn(`message handling failed: ${describeError(error)}`);
+        log.warn(`message handling failed: ${describeError(error as Error)}`);
       }
     });
 

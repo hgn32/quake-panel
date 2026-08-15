@@ -33,12 +33,13 @@ export class KmoniClock {
     private readonly hub: Hub,
   ) {}
 
-  async start(): Promise<void> {
-    await this.sync();
-    this.timer = setInterval(() => {
-      void this.sync();
-    }, this.config.kmoni.clockSyncIntervalMs);
-    this.timer.unref?.();
+  start(): Promise<void> {
+    return this.sync().then(() => {
+      this.timer = setInterval(() => {
+        void this.sync();
+      }, this.config.kmoni.clockSyncIntervalMs);
+      this.timer.unref?.();
+    });
   }
 
   stop(): void {
@@ -60,14 +61,13 @@ export class KmoniClock {
     return this.synced;
   }
 
-  private async sync(): Promise<void> {
+  private sync(): Promise<void> {
     const url = `${this.config.kmoni.baseUrl}/webservice/server/pros/latest.json`;
     const sentAt = Date.now();
-    try {
-      const json = await fetchJson<LatestJson>(url, {
-        timeoutMs: this.config.kmoni.requestTimeoutMs,
-        noStore: true,
-      });
+    return fetchJson<LatestJson>(url, {
+      timeoutMs: this.config.kmoni.requestTimeoutMs,
+      noStore: true,
+    }).then((json) => {
       const receivedAt = Date.now();
       const requestTime = parseJstDateTime(json.request_time);
       const latestTime = parseJstDateTime(json.latest_time);
@@ -83,8 +83,9 @@ export class KmoniClock {
       this.synced = true;
       this.hub.setClockOffset(this.clockOffsetMs);
       log.debug(`synced offset=${this.clockOffsetMs}ms lag=${this.dataLagMs}ms rtt=${rtt}ms`);
-    } catch (error) {
+    }).catch((error: Error) => {
+      // 時刻合わせに失敗しても取得は続ける (前回の補正値のまま進む)
       log.warn(`sync failed: ${describeError(error)}`);
-    }
+    });
   }
 }

@@ -40,11 +40,18 @@ export class Basemap {
   /** 予報区の強調表示用に、名前から都道府県を引けるようにしておく */
   private byName = new Map<string, BasemapPrefecture>();
 
-  async load(url = resolveUrl('/assets/japan-map.json')): Promise<void> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`背景地図を読み込めませんでした: HTTP ${res.status}`);
-    this.data = (await res.json()) as BasemapData;
-    this.byName = new Map(this.data.prefectures.map((p) => [p.name, p]));
+  load(url = resolveUrl('/assets/japan-map.json')): Promise<void> {
+    return fetch(url)
+      .then((res) => {
+        if (!res.ok) {
+          return Promise.reject(new Error(`背景地図を読み込めませんでした: HTTP ${res.status}`));
+        }
+        return res.json() as Promise<BasemapData>;
+      })
+      .then((data) => {
+        this.data = data;
+        this.byName = new Map(data.prefectures.map((p) => [p.name, p]));
+      });
   }
 
   isLoaded(): boolean {
@@ -114,25 +121,25 @@ export class Basemap {
     ctx.lineWidth = Math.max(0.12, 0.6 / transform.scale);
     ctx.lineJoin = 'round';
 
-    for (const pref of this.data.prefectures) {
-      for (const ring of pref.rings) {
+    this.data.prefectures.forEach((pref) =>
+      pref.rings.forEach((ring) => {
         tracePath(ctx, ring);
         ctx.fill();
         ctx.stroke();
-      }
-    }
+      }),
+    );
 
     // 海岸線は少し明るくして輪郭を立たせる (県境と区別する)
     ctx.strokeStyle = theme.coast;
     ctx.lineWidth = Math.max(0.15, 0.9 / transform.scale);
-    for (const pref of this.data.prefectures) {
-      for (const ring of pref.rings) {
-        if (ring.length < 40) {
+    this.data.prefectures.forEach((pref) =>
+      pref.rings
+        .filter((ring) => ring.length < 40)
+        .forEach((ring) => {
           tracePath(ctx, ring);
           ctx.stroke();
-        }
-      }
-    }
+        }),
+    );
     ctx.restore();
   }
 
@@ -148,14 +155,15 @@ export class Basemap {
     ctx.translate(transform.offsetX, transform.offsetY);
     ctx.scale(transform.scale, transform.scale);
     ctx.fillStyle = style;
-    for (const name of names) {
-      const pref = this.matchPrefecture(name);
-      if (!pref) continue;
-      for (const ring of pref.rings) {
-        tracePath(ctx, ring);
-        ctx.fill();
-      }
-    }
+    names
+      .map((name) => this.matchPrefecture(name))
+      .filter((pref) => pref !== null)
+      .forEach((pref) =>
+        pref.rings.forEach((ring) => {
+          tracePath(ctx, ring);
+          ctx.fill();
+        }),
+      );
     ctx.restore();
   }
 
@@ -166,18 +174,19 @@ export class Basemap {
   matchPrefecture(name: string): BasemapPrefecture | null {
     const exact = this.byName.get(name);
     if (exact) return exact;
-    for (const [key, pref] of this.byName) {
-      if (name.includes(key) || key.includes(name)) return pref;
-    }
-    return null;
+    const partial = [...this.byName.entries()].find(
+      ([key]) => name.includes(key) || key.includes(name),
+    );
+    return partial ? partial[1] : null;
   }
 }
 
 function tracePath(ctx: CanvasRenderingContext2D, ring: number[]): void {
   ctx.beginPath();
   ctx.moveTo(ring[0] ?? 0, ring[1] ?? 0);
-  for (let i = 2; i < ring.length; i += 2) {
+  // 平坦配列 [x0,y0,x1,y1,...] を 2 つずつ辿る
+  Array.from({ length: Math.floor(ring.length / 2) - 1 }, (_, i) => (i + 1) * 2).forEach((i) => {
     ctx.lineTo(ring[i] ?? 0, ring[i + 1] ?? 0);
-  }
+  });
   ctx.closePath();
 }

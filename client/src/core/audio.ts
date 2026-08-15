@@ -72,20 +72,28 @@ export class AlertAudio {
   }
 
   /** 初回のユーザー操作から呼ぶ */
-  async unlock(): Promise<boolean> {
+  unlock(): Promise<boolean> {
     try {
       if (!this.context) {
-        const Ctor = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Ctor) return false;
+        const Ctor =
+          window.AudioContext ??
+          (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) return Promise.resolve(false);
         this.context = new Ctor();
         this.master = this.context.createGain();
         this.master.gain.value = this.volume;
         this.master.connect(this.context.destination);
       }
-      if (this.context.state === 'suspended') await this.context.resume();
-      return this.context.state === 'running';
+      const context = this.context;
+      const resumed =
+        context.state === 'suspended' ? context.resume() : Promise.resolve();
+      return resumed.then(
+        () => context.state === 'running',
+        // 解錠できなくても表示は続ける (音だけ出ない)
+        () => false,
+      );
     } catch {
-      return false;
+      return Promise.resolve(false);
     }
   }
 
@@ -125,11 +133,11 @@ export class AlertAudio {
     const base = ctx.currentTime + 0.02;
     const deadline = this.maxSeconds > 0 ? base + this.maxSeconds : Number.POSITIVE_INFINITY;
 
-    for (let r = 0; r < repeat; r += 1) {
-      const cycleStart = base + r * pattern.interval;
-      // 上限を超える繰り返しは最初から鳴らさない
-      if (cycleStart >= deadline) break;
-      for (const tone of pattern.tones) {
+    // 上限を超える繰り返しは最初から鳴らさない
+    Array.from({ length: repeat }, (_, r) => base + r * pattern.interval)
+      .filter((cycleStart) => cycleStart < deadline)
+      .forEach((cycleStart) => {
+        pattern.tones.forEach((tone) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = tone.type;
@@ -145,8 +153,8 @@ export class AlertAudio {
         osc.start(at);
         osc.stop(at + tone.duration + 0.02);
         this.track(osc);
-      }
-    }
+      });
+    });
 
     // 予定より長引いた場合 (連続で鳴らされた場合を含む) の保険
     if (this.silenceTimer !== null) window.clearTimeout(this.silenceTimer);
@@ -164,13 +172,13 @@ export class AlertAudio {
       window.clearTimeout(this.silenceTimer);
       this.silenceTimer = null;
     }
-    for (const node of this.active) {
+    this.active.forEach((node) => {
       try {
         node.stop();
       } catch {
         // すでに終了しているノードは無視
       }
-    }
+    });
     this.active = [];
   }
 

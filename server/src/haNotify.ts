@@ -1,6 +1,7 @@
 import {
   intensityLabel,
   type EewState,
+  type JsonValue,
   type QuakeInfo,
   type ServerEvent,
   type TsunamiInfo,
@@ -11,11 +12,14 @@ import { createLogger, describeError } from './logger.js';
 
 const log = createLogger('ha');
 
+/** HA のコア API へ送る JSON の中身 */
+type JsonRecord = Record<string, JsonValue>;
+
 /** HA へ渡す 1 エンティティぶんの状態 */
 export interface EntityState {
   entityId: string;
   state: string;
-  attributes: Record<string, unknown>;
+  attributes: JsonRecord;
 }
 
 /**
@@ -112,55 +116,71 @@ export class HomeAssistantNotifier {
    * 並行に投げると古い状態が後から届いて、EEW が終わっていないのに
    * 「発表なし」で上書きされることがある。
    */
-  private async pushStates(): Promise<void> {
+  private pushStates(): Promise<void> {
     if (this.pushing) {
       this.pushDirty = true;
-      return;
+      return Promise.resolve();
     }
     this.pushing = true;
-    try {
-      do {
-        this.pushDirty = false;
-        for (const entity of buildEntities(this.eew, this.tsunami, this.quake)) {
-          await this.post(`/states/${entity.entityId}`, {
-            state: entity.state,
-            attributes: entity.attributes,
-          });
-        }
-      } while (this.pushDirty);
-    } finally {
-      this.pushing = false;
-    }
+    return this.pushRound().then(
+      () => {
+        this.pushing = false;
+      },
+      () => {
+        this.pushing = false;
+      },
+    );
   }
 
-  private async fire(eventType: string, data: Record<string, unknown>): Promise<void> {
-    await this.post(`/events/${eventType}`, data);
+  /** 1 巡ぶん流す。流している間に状態が変わっていたら、もう 1 巡する。 */
+  private pushRound(): Promise<void> {
+    this.pushDirty = false;
+    // 実体は 4 つだけ。順番に投げて、古い状態で上書きしないようにする。
+    const entities = buildEntities(this.eew, this.tsunami, this.quake);
+    return entities
+      .reduce(
+        (chain, entity) =>
+          chain.then(() =>
+            this.post(`/states/${entity.entityId}`, {
+              state: entity.state,
+              attributes: entity.attributes,
+            }),
+          ),
+        Promise.resolve(),
+      )
+      .then(() => (this.pushDirty ? this.pushRound() : undefined));
   }
 
-  private async post(path: string, body: unknown): Promise<void> {
+  private fire(eventType: string, data: JsonRecord): Promise<void> {
+    return this.post(`/events/${eventType}`, data);
+  }
+
+  private post(path: string, body: JsonRecord): Promise<void> {
     const url = `${this.config.homeAssistant.apiUrl.replace(/\/$/, '')}${path}`;
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.config.homeAssistant.token}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.config.homeAssistant.timeoutMs),
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.config.homeAssistant.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.config.homeAssistant.timeoutMs),
+    })
+      .then((res) => {
+        if (!res.ok) return Promise.reject(new Error(`HTTP ${res.status}`));
+        if (this.failing) {
+          this.failing = false;
+          log.info('Home Assistant への通知が復帰しました');
+        }
+        return undefined;
+      })
+      .catch((error: Error) => {
+        // 通知が届かなくてもパネルの表示は続ける
+        if (!this.failing) {
+          this.failing = true;
+          log.warn(`Home Assistant へ通知できません (${path}): ${describeError(error)}`);
+        }
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (this.failing) {
-        this.failing = false;
-        log.info('Home Assistant への通知が復帰しました');
-      }
-    } catch (error) {
-      // 通知が届かなくてもパネルの表示は続ける
-      if (!this.failing) {
-        this.failing = true;
-        log.warn(`Home Assistant へ通知できません (${path}): ${describeError(error)}`);
-      }
-    }
   }
 }
 
@@ -170,7 +190,7 @@ export function eewEventKey(eew: EewState | null): string {
   return [eew.id, eew.alert, eew.maxIntensity ?? '-', eew.isCancel, eew.isFinal].join(':');
 }
 
-export function eewEventData(eew: EewState | null): Record<string, unknown> {
+export function eewEventData(eew: EewState | null): JsonRecord {
   if (!eew) return { active: false };
   return {
     active: !eew.isCancel,
@@ -189,7 +209,7 @@ export function eewEventData(eew: EewState | null): Record<string, unknown> {
   };
 }
 
-export function tsunamiEventData(tsunami: TsunamiInfo | null): Record<string, unknown> {
+export function tsunamiEventData(tsunami: TsunamiInfo | null): JsonRecord {
   if (!tsunami) return { active: false };
   return {
     active: !tsunami.cancelled && tsunami.areas.length > 0,
@@ -200,7 +220,7 @@ export function tsunamiEventData(tsunami: TsunamiInfo | null): Record<string, un
   };
 }
 
-export function quakeEventData(quake: QuakeInfo): Record<string, unknown> {
+export function quakeEventData(quake: QuakeInfo): JsonRecord {
   return {
     id: quake.id,
     max_intensity: intensityLabel(quake.maxIntensity),

@@ -16,18 +16,17 @@ export interface PixelArea {
 export function pointInRing(ring: readonly number[], x: number, y: number): boolean {
   const count = Math.floor(ring.length / 2);
   if (count < 3) return false;
-  let inside = false;
-  for (let i = 0, j = count - 1; i < count; j = i++) {
+  // 各辺が「点から右へ伸ばした半直線」と交わるかを数え、奇数なら内側。
+  // 頂点の重なりで二重に数えないよう、上向きの辺だけを数える。
+  const crossings = Array.from({ length: count }, (_, i) => i).filter((i) => {
+    const j = (i + count - 1) % count;
     const xi = ring[i * 2] ?? 0;
     const yi = ring[i * 2 + 1] ?? 0;
     const xj = ring[j * 2] ?? 0;
     const yj = ring[j * 2 + 1] ?? 0;
-    // 頂点の重なりで二重に数えないよう、上向きの辺だけを数える
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
+    return yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+  });
+  return crossings.length % 2 === 1;
 }
 
 /** 座標を含む領域の名前。どれにも入らなければ null (海上など)。 */
@@ -36,10 +35,6 @@ export function findAreaAtPixel(
   x: number,
   y: number,
 ): string | null {
-  for (const area of areas) {
-    for (const ring of area.rings) {
-      if (pointInRing(ring, x, y)) return area.name;
-    }
-  }
-  return null;
+  const hit = areas.find((area) => area.rings.some((ring) => pointInRing(ring, x, y)));
+  return hit ? hit.name : null;
 }
