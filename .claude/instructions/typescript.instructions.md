@@ -1,0 +1,7 @@
+- セミコロンを必ず付ける
+- `any` `unknown` 型の使用禁止
+- `console.log` の残置禁止
+- `await` の使用禁止（`Promise` を使用すること）
+- `for` ループの使用禁止（`map` や `filter` を使用すること）
+- `!`（Non-null assertion operator）の使用禁止（`null` の可能性がある場合は `null` チェックを行い `Promise.reject` や `throw` でエラーにすること）
+- 積極的に既存ファイルとの共存を考慮すること

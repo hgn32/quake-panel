@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node-terminal",
+      "name": "start server",
+      "request": "launch",
+      "command": "{ lsof -ti tcp:8080 -sTCP:LISTEN; pgrep -f '/workspaces/[s]erver/src/index.ts'; } 2>/dev/null | sort -u | xargs -r kill -9 2>/dev/null; npm run dev",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

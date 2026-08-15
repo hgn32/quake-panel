@@ -1,0 +1,20 @@
+{
+  "name": "@quake-panel/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b ../shared && tsx watch --clear-screen=false src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@quake-panel/shared": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.23.12"
+  }
+}

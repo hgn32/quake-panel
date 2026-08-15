@@ -1,0 +1,28 @@
+{
+  "name": "quake-panel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "常時表示型 地震速報パネル (強震モニタ + EEW + 津波)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "build": "npm run build -w @quake-panel/shared && npm run build -w @quake-panel/client && npm run build -w @quake-panel/server",
+    "typecheck": "tsc -b shared server client --pretty",
+    "dev": "npm run dev -w @quake-panel/server",
+    "dev:client": "npm run dev -w @quake-panel/client",
+    "start": "node server/dist/index.js",
+    "test": "npm run build && node --test \"shared/test/*.test.mjs\" \"server/test/*.test.mjs\"",
+    "clean": "rm -rf shared/dist server/dist client/dist shared/*.tsbuildinfo server/*.tsbuildinfo client/*.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+**/dist-types
+**/*.tsbuildinfo
+.git
+.github
+docs
+deploy
+scripts
+*.log
+.vscode
+.git
+aws
