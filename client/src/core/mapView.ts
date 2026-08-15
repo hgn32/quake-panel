@@ -81,6 +81,9 @@ export class MapView {
   private animating = false;
   private resizeObserver: ResizeObserver | null = null;
   private drag: { pointerId: number; x: number; y: number; moved: number } | null = null;
+  /** いま画面に触れている指。2 本になったらピンチ操作に切り替える。 */
+  private readonly pointers = new Map<number, { x: number; y: number }>();
+  private pinchDistance: number | null = null;
   private scratch: HTMLCanvasElement | null = null;
   private points: Map<string, number[]> | null = null;
   private pointsFor: ImageBitmap | null = null;
@@ -175,11 +178,58 @@ export class MapView {
 
   private readonly handlePointerDown = (ev: PointerEvent): void => {
     if (ev.button !== 0) return;
+    this.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (this.pointers.size >= 2) {
+      // 2 本目が触れたらピンチ。1 本指のスクロールは止める。
+      this.drag = null;
+      this.pinchDistance = this.currentPinchDistance();
+      return;
+    }
     this.drag = { pointerId: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: 0 };
     this.canvas.setPointerCapture(ev.pointerId);
   };
 
+  /** 2 本の指の間隔。2 本触れていなければ null。 */
+  private currentPinchDistance(): number | null {
+    const points = [...this.pointers.values()];
+    const first = points[0];
+    const second = points[1];
+    if (!first || !second) return null;
+    return Math.hypot(first.x - second.x, first.y - second.y);
+  }
+
+  /** 2 本の指の中点。2 本触れていなければ null。 */
+  private currentPinchCenter(): { x: number; y: number } | null {
+    const points = [...this.pointers.values()];
+    const first = points[0];
+    const second = points[1];
+    if (!first || !second) return null;
+    return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+  }
+
+  /**
+   * ピンチでの拡大縮小。指の中点を動かさずに倍率だけ変える。
+   * スマホではホイールが無いので、これが唯一の拡大手段になる。
+   */
+  private handlePinch(): void {
+    const previous = this.pinchDistance;
+    const distance = this.currentPinchDistance();
+    const center = this.currentPinchCenter();
+    if (previous === null || distance === null || center === null) return;
+    if (previous <= 0 || distance <= 0) return;
+    this.pinchDistance = distance;
+    if (!this.options.interactive) return;
+    this.zoomAt(center.x, center.y, distance / previous);
+  }
+
   private readonly handlePointerMove = (ev: PointerEvent): void => {
+    if (this.pointers.has(ev.pointerId)) {
+      this.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    }
+    if (this.pointers.size >= 2) {
+      this.handlePinch();
+      return;
+    }
     const drag = this.drag;
     if (!drag || drag.pointerId !== ev.pointerId) return;
     const dx = ev.clientX - drag.x;
@@ -192,6 +242,8 @@ export class MapView {
   };
 
   private readonly handlePointerUp = (ev: PointerEvent): void => {
+    this.pointers.delete(ev.pointerId);
+    if (this.pointers.size < 2) this.pinchDistance = null;
     const drag = this.drag;
     if (!drag || drag.pointerId !== ev.pointerId) return;
     this.drag = null;
