@@ -4,8 +4,8 @@ import type { ConnectionState } from '../core/connection.js';
 /**
  * 上部の状態表示。無人運用なので、異常はここだけ見れば分かるようにする。
  *
- * チップは「何の状態か」と「どうなっているか」を必ず一緒に出す。
- * 名前だけを出しても、色を覚えていない人には読み取れない。
+ * チップは平常時は名前だけ (緑) にして、異常なときだけ何が起きたかを添える。
+ * 常時点けっぱなしの画面なので、平常時ほど文字が少ない方が異常に気付きやすい。
  */
 export class StatusBar {
   private connection: ConnectionState = 'connecting';
@@ -28,8 +28,8 @@ export class StatusBar {
 
   /**
    * サーバーとの接続は、切れているときだけ出す。
-   * つながっていれば「強震モニタ 受信中」「地震情報 受信中」が動いていること
-   * 自体が接続の証拠になるので、平常時に並べる意味がない。
+   * つながっていれば強震モニタと地震情報のチップが緑になっていること自体が
+   * 接続の証拠になるので、平常時に並べる意味がない。
    */
   setConnection(state: ConnectionState): void {
     this.connection = state;
@@ -45,7 +45,7 @@ export class StatusBar {
   setHealth(health: HealthState): void {
     this.health = health;
     this.renderKmoni();
-    setChip(this.p2p, '地震情報', health.p2p.ok ? '受信中' : '切断', health.p2p.ok ? 'ok' : 'bad');
+    setChip(this.p2p, '地震情報', health.p2p.ok ? null : '切断', health.p2p.ok ? 'ok' : 'bad');
     this.renderNotice();
   }
 
@@ -71,7 +71,7 @@ export class StatusBar {
       setChip(this.kmoni, '強震モニタ', `${Math.round(this.frameLatencyMs / 1000)}秒遅延`, 'warn');
       return;
     }
-    setChip(this.kmoni, '強震モニタ', '受信中', 'ok');
+    setChip(this.kmoni, '強震モニタ', null, 'ok');
   }
 
   /**
@@ -112,7 +112,19 @@ export class StatusBar {
   }
 }
 
-function setChip(el: HTMLElement, name: string, state: string, level: 'ok' | 'warn' | 'bad'): void {
-  el.textContent = `${name} ${state}`;
+/**
+ * 状態チップの描画。
+ *
+ * 正常時は名前だけにする。「受信中」は緑の枠で分かるうえ、常時表示の画面では
+ * 平常時ほど文字が減っていた方が異常に気付きやすい。異常なとき (不通・切断・
+ * 遅延) は色だけでは何が起きたか分からないので、必ず文言を添える。
+ */
+function setChip(
+  el: HTMLElement,
+  name: string,
+  state: string | null,
+  level: 'ok' | 'warn' | 'bad',
+): void {
+  el.textContent = state === null ? name : `${name} ${state}`;
   el.className = `chip chip--${level}`;
 }
