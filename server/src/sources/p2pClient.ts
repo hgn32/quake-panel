@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
+import { createWsProxyAgent } from '../proxy.js';
 import { fetchJson } from './httpClient.js';
 import { parseEew, parseEewDetection, parseQuake, parseTsunami } from './p2pParse.js';
 import { P2P_CODES, type P2PEew, type P2PEewDetection, type P2PQuake, type P2PTsunami } from './p2pTypes.js';
@@ -68,9 +69,12 @@ export class P2PClient {
   private connect(): void {
     if (this.stopped) return;
     log.info(`connecting to ${this.config.p2p.wsUrl}`);
+    // ws は環境変数を見ないので、プロキシ配下では agent を明示的に渡す。
+    const proxyAgent = createWsProxyAgent(this.config.p2p.wsUrl);
     const socket = new WebSocket(this.config.p2p.wsUrl, {
       handshakeTimeout: 10_000,
       headers: { 'user-agent': 'quake-panel/0.1 (private household display)' },
+      ...(proxyAgent === null ? {} : { agent: proxyAgent }),
     });
     this.socket = socket;
 

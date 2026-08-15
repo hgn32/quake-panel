@@ -4,6 +4,7 @@ import { createHttpServer } from './http/server.js';
 import { Hub } from './hub.js';
 import { HomeAssistantNotifier } from './haNotify.js';
 import { createLogger, describeError, setLogLevel } from './logger.js';
+import { applyGlobalProxy } from './proxy.js';
 import { KmoniClock } from './sources/kmoniClock.js';
 import { KmoniEewWorker } from './sources/kmoniEew.js';
 import { KmoniFrameWorker } from './sources/kmoniFrames.js';
@@ -15,6 +16,11 @@ const log = createLogger('main');
 async function main(): Promise<void> {
   const config = loadConfig();
   setLogLevel(config.logLevel);
+
+  // 社内プロキシ配下のときだけ上流アクセスをプロキシ経由に切り替える。
+  // 環境変数が無ければ何もしないので、アドオン本番は直接接続のまま。
+  const proxyUrl = applyGlobalProxy();
+  if (proxyUrl !== null) log.info(`upstream via proxy ${proxyUrl}`);
 
   const hub = new Hub(config);
   const clock = new KmoniClock(config, hub);
