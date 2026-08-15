@@ -1,6 +1,9 @@
 import {
   intensityLabel,
+  shouldNotifyEew,
+  shouldNotifyQuake,
   type EewState,
+  type HaNotifyFilter,
   type JsonValue,
   type QuakeInfo,
   type ServerEvent,
@@ -65,7 +68,11 @@ export class HomeAssistantNotifier {
     this.timer = setInterval(() => void this.pushStates(), this.config.homeAssistant.refreshMs);
     this.timer.unref();
     void this.pushStates();
-    log.info(`Home Assistant への通知を有効にしました (${this.config.homeAssistant.apiUrl})`);
+    log.info(
+      `Home Assistant への通知を有効にしました (${this.config.homeAssistant.apiUrl} / ${describeFilter(
+        this.config.homeAssistant.filter,
+      )})`,
+    );
   }
 
   stop(): void {
@@ -73,9 +80,26 @@ export class HomeAssistantNotifier {
     this.timer = null;
   }
 
+  /** 通知の絞り込み */
+  private get filter(): HaNotifyFilter {
+    return this.config.homeAssistant.filter;
+  }
+
+  /**
+   * 絞り込みで落とす緊急地震速報か。
+   *
+   * 一度 HA へ流した地震の続報は、下方修正で条件を外れても流し続ける。
+   * 途中で黙ると、自動化で点けた照明やダッシュボードを戻せなくなるため。
+   */
+  private acceptEew(next: EewState | null): boolean {
+    if (shouldNotifyEew(next, this.filter)) return true;
+    return next !== null && this.eew !== null && this.eew.id === next.id;
+  }
+
   private handle(event: ServerEvent): void {
     switch (event.type) {
       case 'eew': {
+        if (!this.acceptEew(event.eew)) break;
         this.eew = event.eew;
         const key = eewEventKey(event.eew);
         if (key !== this.lastEventKey.eew) {
@@ -96,6 +120,7 @@ export class HomeAssistantNotifier {
         break;
       }
       case 'quake': {
+        if (!shouldNotifyQuake(event.quake, this.filter)) break;
         this.quake = event.quake;
         if (event.quake.id !== this.lastEventKey.quake) {
           this.lastEventKey.quake = event.quake.id;
@@ -182,6 +207,16 @@ export class HomeAssistantNotifier {
         }
       });
   }
+}
+
+/** 起動ログに出す絞り込みの説明 (何が届かないのか、ログタブだけで分かるように) */
+export function describeFilter(filter: HaNotifyFilter): string {
+  const intensity =
+    filter.minIntensity > 0
+      ? `震度${intensityLabel(filter.minIntensity) ?? filter.minIntensity}以上`
+      : '震度の条件なし';
+  const area = filter.prefectures.length > 0 ? filter.prefectures.join('・') : '全国';
+  return `通知条件: ${intensity} / ${area}`;
 }
 
 /** 続報のたびに流すと騒がしいので、意味が変わったときだけ流す */
