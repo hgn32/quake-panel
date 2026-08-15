@@ -1,4 +1,12 @@
-import { geolocationErrorMessage, type HomeLocation } from '@quake-panel/shared';
+import {
+  KMONI_LAYERS,
+  KMONI_LAYER_LABELS,
+  KMONI_LAYER_NOTES,
+  MIN_INTENSITY_CHOICES,
+  geolocationErrorMessage,
+  type HomeLocation,
+  type KmoniLayer,
+} from '@quake-panel/shared';
 import type { Settings, UrlKey } from '../settings.js';
 import { h, replaceChildren } from './dom.js';
 
@@ -35,6 +43,10 @@ export interface SettingsPanelDeps {
   requestHomeAssistantLocation: () => Promise<HomeLocation | null>;
   /** 自動設定のときに、いま効いている予報区を見せるために使う */
   describeTsunamiAreas: () => string;
+  /** サーバーが既定にしている指標 (「サーバー既定」の中身を見せるため) */
+  serverLayer: () => KmoniLayer;
+  /** 絞り込みで隠れている地震の件数 */
+  hiddenQuakeCount: () => number;
 }
 
 /**
@@ -113,8 +125,11 @@ export class SettingsPanel {
           this.deps.onTest();
         }),
       ),
+      this.layerRow(settings),
       this.homeRow(settings),
       this.tsunamiRow(settings),
+      this.quakeFilterRow(settings),
+      this.flashRow(settings),
       this.checkboxRow(
         '表示位置を固定',
         '地図のホイール操作とドラッグを受け付けなくします。常時表示の端末で誤って動かさないため。',
@@ -130,6 +145,120 @@ export class SettingsPanel {
       this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
         this.deps.onChange({ historyCount: value }),
       ),
+    );
+  }
+
+  /** 地図に出す指標。サーバーの既定に従うか、この端末だけ変えるか。 */
+  private layerRow(settings: Settings): HTMLElement {
+    const server = this.deps.serverLayer();
+    const options = [
+      { value: '', label: `サーバー既定 (${KMONI_LAYER_LABELS[server]})`, checked: settings.layer === null },
+      ...KMONI_LAYERS.map((layer) => ({
+        value: layer,
+        label: KMONI_LAYER_LABELS[layer],
+        checked: settings.layer === layer,
+      })),
+    ];
+    const note = h('span', {
+      class: 'settings__hint',
+      text: KMONI_LAYER_NOTES[settings.layer ?? server],
+    });
+    return h(
+      'div',
+      { class: 'settings__row' },
+      h(
+        'div',
+        { class: 'settings__label' },
+        h('span', { text: '地図に出す指標' }),
+        h('span', {
+          class: 'settings__hint',
+          text: 'この端末だけ変えられます。既定以外を選ぶと、その分だけサーバーが追加で取得します。',
+        }),
+        note,
+      ),
+      this.radioGroup('kmoni-layer', options, (value) => {
+        this.deps.onChange({ layer: value === '' ? null : (value as KmoniLayer) });
+        this.render();
+      }),
+    );
+  }
+
+  /** 地震情報の絞り込み。全国の小さな地震で履歴が埋まるのを防ぐ。 */
+  private quakeFilterRow(settings: Settings): HTMLElement {
+    const filter = settings.quakeFilter;
+    const select = h('select', { class: 'settings__select' });
+    for (const choice of MIN_INTENSITY_CHOICES) {
+      const option = h('option', { value: String(choice.value), text: choice.label });
+      option.selected = choice.value === filter.minIntensity;
+      select.append(option);
+    }
+    select.addEventListener('change', () => {
+      this.deps.onChange({
+        quakeFilter: { ...this.deps.getSettings().quakeFilter, minIntensity: Number(select.value) },
+      });
+      this.render();
+    });
+
+    const only = h('input', { type: 'checkbox' });
+    only.checked = filter.homePrefectureOnly;
+    only.addEventListener('change', () => {
+      this.deps.onChange({
+        quakeFilter: { ...this.deps.getSettings().quakeFilter, homePrefectureOnly: only.checked },
+      });
+      this.render();
+    });
+
+    const hidden = this.deps.hiddenQuakeCount();
+    return h(
+      'div',
+      { class: 'settings__row' },
+      h(
+        'div',
+        { class: 'settings__label' },
+        h('span', { text: '履歴に出す地震' }),
+        h('span', {
+          class: 'settings__hint',
+          text:
+            hidden > 0
+              ? `いまの条件で ${hidden} 件を隠しています。`
+              : '小さな地震や、自分の県が揺れていない地震を隠せます。',
+        }),
+      ),
+      h(
+        'div',
+        { class: 'settings__stack' },
+        h('label', { class: 'settings__option' }, h('span', { text: '最大震度' }), select),
+        h(
+          'label',
+          { class: 'settings__option' },
+          only,
+          h('span', { text: '利用地の都道府県で揺れたものだけ' }),
+        ),
+      ),
+    );
+  }
+
+  /** 明滅を続ける上限。遠方の地震で光り続けるのを避ける。 */
+  private flashRow(settings: Settings): HTMLElement {
+    const select = h('select', { class: 'settings__select' });
+    for (const choice of [
+      { value: 15, label: '15秒' },
+      { value: 30, label: '30秒' },
+      { value: 60, label: '60秒' },
+      { value: 180, label: '3分' },
+      { value: 0, label: '止めない' },
+    ]) {
+      const option = h('option', { value: String(choice.value), text: choice.label });
+      option.selected = choice.value === settings.flashSeconds;
+      select.append(option);
+    }
+    select.addEventListener('change', () =>
+      this.deps.onChange({ flashSeconds: Number(select.value) }),
+    );
+    return this.row(
+      '画面明滅を続ける時間',
+      '発表が続いていても、この時間で明滅だけ止めます (音は最初の 10 秒で止まります)。',
+      select,
     );
   }
 

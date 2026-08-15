@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
-import { ENDPOINTS } from '@quake-panel/shared';
+import { ENDPOINTS, parseKmoniLayer } from '@quake-panel/shared';
 import type { Config } from '../config.js';
 import { fetchHomeLocation } from '../haLocation.js';
 import type { Hub } from '../hub.js';
@@ -11,17 +11,14 @@ import { serveStatic } from './static.js';
 
 const log = createLogger('http');
 
+/** EEW 発表中の補助レイヤ。観測画像は指標を含む別のルートで扱う。 */
 const FRAME_ROUTES: Array<{ prefix: string; layer: FrameLayer }> = [
-  { prefix: '/kmoni/frame/', layer: 'realtime' },
   { prefix: '/kmoni/pswave/', layer: 'psWave' },
   { prefix: '/kmoni/estshindo/', layer: 'estShindo' },
 ];
 
-const LATEST_ROUTES: Record<string, FrameLayer> = {
-  '/kmoni/latest.gif': 'realtime',
-  '/kmoni/pswave/latest.gif': 'psWave',
-  '/kmoni/estshindo/latest.gif': 'estShindo',
-};
+/** `/kmoni/frame/{指標}/{時刻}.gif` */
+const FRAME_PATTERN = /^\/kmoni\/frame\/([a-z]+)\/(\d{14})\.gif$/;
 
 /**
  * クライアント向けの HTTP。
@@ -78,10 +75,29 @@ export function createHttpServer(
       });
     }
 
-    const latestLayer = LATEST_ROUTES[path];
-    if (latestLayer) {
-      sendImage(res, frames.getLatest(latestLayer), 'no-store');
+    // 直接アクセス用。サーバーが既定で取っている指標の最新画像を返す。
+    if (path === ENDPOINTS.latestFrame) {
+      sendImage(res, frames.getLatest(frames.defaultLayer), 'no-store');
       return;
+    }
+    if (path === '/kmoni/pswave/latest.gif' || path === '/kmoni/estshindo/latest.gif') {
+      sendImage(res, frames.getLatest(path.includes('pswave') ? 'psWave' : 'estShindo'), 'no-store');
+      return;
+    }
+
+    // 観測画像。端末が選んだ指標をここで受ける。既定以外は普段取っていないので、
+    // 初回だけ取りに行き、以後しばらくは毎秒の取得対象へ加える (kmoniFrames 側)。
+    const frameMatch = FRAME_PATTERN.exec(path);
+    if (frameMatch) {
+      const layer = parseKmoniLayer(frameMatch[1]);
+      const timestamp = frameMatch[2];
+      if (!layer || !timestamp) {
+        res.writeHead(404, { 'cache-control': 'no-store' }).end();
+        return;
+      }
+      return frames.requestImage(layer, timestamp).then((image) => {
+        sendImage(res, image, 'immutable');
+      });
     }
 
     for (const route of FRAME_ROUTES) {

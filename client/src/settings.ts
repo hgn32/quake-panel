@@ -1,4 +1,14 @@
-import { DEFAULT_SIDE_WIDTH, HOME_LOCATION, KMONI_MAP } from '@quake-panel/shared';
+import {
+  DEFAULT_FLASH_SECONDS,
+  DEFAULT_QUAKE_FILTER,
+  DEFAULT_SIDE_WIDTH,
+  HOME_LOCATION,
+  KMONI_MAP,
+  clampFlashSeconds,
+  parseKmoniLayer,
+  type KmoniLayer,
+  type QuakeFilter,
+} from '@quake-panel/shared';
 import { ZOOM_RANGE, fullMapView, type MapViewState } from './core/mapView.js';
 
 /**
@@ -30,6 +40,12 @@ export interface Settings {
   sideHeight: number;
   /** 操作で地図を動かさない (キオスク運用向け) */
   locked: boolean;
+  /** 表示する強震モニタの指標。null はサーバーの既定に従う */
+  layer: KmoniLayer | null;
+  /** 明滅を続ける上限 (秒)。0 なら止めない */
+  flashSeconds: number;
+  /** 地震情報の絞り込み */
+  quakeFilter: QuakeFilter;
 }
 
 /** URL で上書きできる設定。ここに無いものは端末の設定が常に勝つ。 */
@@ -49,6 +65,9 @@ export const DEFAULT_SETTINGS: Settings = {
   sideWidth: DEFAULT_SIDE_WIDTH,
   sideHeight: 0,
   locked: false,
+  layer: null,
+  flashSeconds: DEFAULT_FLASH_SECONDS,
+  quakeFilter: { ...DEFAULT_QUAKE_FILTER },
 };
 
 /**
@@ -124,6 +143,9 @@ function readStored(storage: Storage | null): Settings {
       sideWidth: readSize(parsed.sideWidth, DEFAULT_SETTINGS.sideWidth),
       sideHeight: readSize(parsed.sideHeight, DEFAULT_SETTINGS.sideHeight),
       locked: parsed.locked ?? DEFAULT_SETTINGS.locked,
+      layer: parseKmoniLayer(parsed.layer),
+      flashSeconds: clampFlashSeconds(parsed.flashSeconds ?? DEFAULT_SETTINGS.flashSeconds),
+      quakeFilter: readFilter(parsed.quakeFilter),
     };
   } catch {
     // 壊れた値が入っていても起動を止めない
@@ -182,6 +204,17 @@ function readHome(value: unknown): { lat: number; lon: number } | null {
   if (typeof lat !== 'number' || typeof lon !== 'number') return null;
   if (!isLat(lat) || !isLon(lon)) return null;
   return { lat, lon };
+}
+
+function readFilter(value: Partial<QuakeFilter> | undefined): QuakeFilter {
+  if (typeof value !== 'object' || value === null) return { ...DEFAULT_QUAKE_FILTER };
+  return {
+    minIntensity:
+      typeof value.minIntensity === 'number' && Number.isFinite(value.minIntensity)
+        ? value.minIntensity
+        : DEFAULT_QUAKE_FILTER.minIntensity,
+    homePrefectureOnly: value.homePrefectureOnly === true,
+  };
 }
 
 function readSize(value: number | undefined, fallback: number): number {

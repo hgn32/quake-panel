@@ -1,7 +1,11 @@
 import {
+  DEFAULT_KMONI_LAYER,
+  KMONI_LAYER_LABELS,
   applyHomeAreas,
   formatJstClock,
+  matchesQuakeFilter,
   tsunamiAreasForPrefecture,
+  type KmoniLayer,
   type EewState,
   type HealthState,
   type QuakeInfo,
@@ -78,6 +82,8 @@ export class App {
   private readonly splitter: Splitter;
 
   private quakes: QuakeInfo[] = [];
+  /** サーバーが既定で取っている指標 (hello で受け取る) */
+  private serverLayer: KmoniLayer = DEFAULT_KMONI_LAYER;
   private tsunami: TsunamiInfo | null = null;
   private eew: EewState | null = null;
   private clockTimer: number | null = null;
@@ -132,6 +138,8 @@ export class App {
         const areas = this.homeAreas();
         return areas.length > 0 ? areas.join('、') : '(利用地の県が分からないため無し)';
       },
+      serverLayer: () => this.serverLayer,
+      hiddenQuakeCount: () => this.quakes.length - this.visibleQuakes().length,
     });
 
     // 地図と地震情報の境目。動かした位置はその端末に保存する
@@ -150,6 +158,7 @@ export class App {
 
   async start(): Promise<void> {
     this.renderLegend();
+    this.alert.setFlashSeconds(this.settings.flashSeconds);
     this.splitter.apply();
     this.splitter.setLocked(this.settings.locked);
     // 画面の回転や縮小で境目が画面外へ出ないよう、都度収め直す
@@ -204,6 +213,9 @@ export class App {
   }
 
   private applySnapshot(snapshot: StateSnapshot): void {
+    this.serverLayer = snapshot.kmoniLayer;
+    // hello の中で取り直しを頼むと堂々巡りになるので、ここでは反映だけ
+    this.applyLayer(false);
     this.quakes = snapshot.quakes;
     this.renderQuakes();
     this.applyHealth(snapshot.health);
@@ -240,13 +252,35 @@ export class App {
    * (EEW が消えたあとに津波の明滅へ戻す、といった遷移をここで一括して扱う)
    */
   private refreshFlash(): void {
-    this.alert.setFlash(
-      this.alert.resolveFlash(this.eew, this.tsunami, this.settings.notifyForecast),
+    this.alert.applyFlash(this.eew, this.tsunami, this.settings.notifyForecast);
+  }
+
+  /** いま表示する指標 (端末の選択 > サーバーの既定) */
+  private currentLayer(): KmoniLayer {
+    return this.settings.layer ?? this.serverLayer;
+  }
+
+  /** 指標を画面と取得先へ反映する */
+  private applyLayer(requestFrame = true): void {
+    const layer = this.currentLayer();
+    if (this.frames.getLayer() !== layer) {
+      this.frames.setLayer(layer);
+      // 切り替えた瞬間から新しい指標で描くため、次の通知を待たずに取り直す
+      if (requestFrame) this.connection.requestResync();
+    }
+    this.renderLegend();
+  }
+
+  /** 絞り込みを通した地震情報 */
+  private visibleQuakes(): QuakeInfo[] {
+    const prefecture = this.mapView.prefectureAt(this.settings.home.lat, this.settings.home.lon);
+    return this.quakes.filter((quake) =>
+      matchesQuakeFilter(quake, this.settings.quakeFilter, prefecture),
     );
   }
 
   private renderQuakes(): void {
-    this.quakeList.update(this.quakes, this.settings.historyCount);
+    this.quakeList.update(this.visibleQuakes(), this.settings.historyCount);
   }
 
   private applySettings(patch: Partial<Settings>): void {
@@ -261,6 +295,8 @@ export class App {
     });
     this.updateMapControls();
     this.splitter.setLocked(this.settings.locked);
+    this.alert.setFlashSeconds(this.settings.flashSeconds);
+    this.applyLayer();
     const homeMoved =
       before.home.lat !== this.settings.home.lat || before.home.lon !== this.settings.home.lon;
     if (homeMoved || before.tsunamiAreas !== this.settings.tsunamiAreas ||
@@ -480,11 +516,13 @@ export class App {
       return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
     });
     bar.style.background = `linear-gradient(90deg, ${colors.join(', ')})`;
+    const label = KMONI_LAYER_LABELS[this.currentLayer()];
     legend.title =
-      '強震モニタのリアルタイム震度の色。気象庁の震度階級 (履歴に出る 1〜7) とは別の指標です。';
+      `強震モニタの「${label}」の色。気象庁の震度階級 (履歴に出る 1〜7) とは別の指標です。`;
     replaceChildren(
       legend,
-      h('span', { class: 'map-legend__title', text: 'リアルタイム震度' }),
+      // いま何を表示しているかは、地図の上に常に出しておく (設定を開かずに分かるように)
+      h('span', { class: 'map-legend__title', text: label }),
       h('span', { class: 'map-legend__end', text: '弱' }),
       bar,
       h('span', { class: 'map-legend__end', text: '強' }),

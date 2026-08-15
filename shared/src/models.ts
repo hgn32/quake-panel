@@ -1,4 +1,5 @@
 import type { IntensityLevel } from './intensity.js';
+import type { KmoniLayer } from './kmoniLayer.js';
 
 /** 震源 */
 export interface Hypocenter {
@@ -178,6 +179,11 @@ export interface StateSnapshot {
   eew: EewState | null;
   quakes: QuakeInfo[];
   tsunami: TsunamiInfo | null;
+  /**
+   * サーバーが既定で取得している強震モニタの指標 (アドオンの設定)。
+   * 端末が何も選んでいなければこれを表示する。
+   */
+  kmoniLayer: KmoniLayer;
   /**
    * 利用地や表示の設定はサーバーが持たない。
    * 端末ごとに localStorage / URL で決める (§3)。

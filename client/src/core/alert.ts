@@ -1,4 +1,4 @@
-import type { EewState, TsunamiInfo } from '@quake-panel/shared';
+import { DEFAULT_FLASH_SECONDS, type EewState, type TsunamiInfo } from '@quake-panel/shared';
 import { AlertAudio, type AlertSound } from './audio.js';
 
 export type FlashLevel = 'none' | 'forecast' | 'warning' | 'tsunami';
@@ -17,8 +17,18 @@ export class AlertPresenter {
    * 系統ごとに分けておかないと、再接続で現況一括を受け直したときに鳴り直す。
    */
   private lastSound = { eew: '', tsunami: '', detection: '' };
+  /** 明滅を続ける上限 (秒)。0 なら止めない。 */
+  private flashSeconds = DEFAULT_FLASH_SECONDS;
+  private flashTimer: number | null = null;
+  /** 打ち切った事象。同じ事象では光らせ直さない (続報のたびに再点灯しないため) */
+  private mutedKey: string | null = null;
 
   constructor(private readonly flashElement: HTMLElement) {}
+
+  /** 端末ごとの設定から上限を受け取る */
+  setFlashSeconds(seconds: number): void {
+    this.flashSeconds = seconds;
+  }
 
   setFlash(level: FlashLevel): void {
     if (this.level === level) return;
@@ -29,6 +39,49 @@ export class AlertPresenter {
 
   getFlash(): FlashLevel {
     return this.level;
+  }
+
+  /**
+   * 明滅の反映。上限を過ぎた事象は光らせない。
+   *
+   * 「発表中はずっと光る」だと、遠方の地震で数分間光り続ける。気づいた後まで
+   * 光らせる意味は無いので、上限を過ぎたら **その事象については** 消す。
+   * 続報で震度や警報種別が変われば別の事象として光り直す。
+   */
+  applyFlash(eew: EewState | null, tsunami: TsunamiInfo | null, notifyForecast: boolean): void {
+    const level = this.resolveFlash(eew, tsunami, notifyForecast);
+    if (level === 'none') {
+      this.clearFlashTimer();
+      this.setFlash('none');
+      return;
+    }
+
+    const key = flashKey(eew, tsunami, level);
+    if (key === this.mutedKey) {
+      this.setFlash('none');
+      return;
+    }
+    // 別の事象になったらタイマーを引き直す
+    if (this.flashTimer === null || key !== this.timerKey) {
+      this.clearFlashTimer();
+      this.timerKey = key;
+      if (this.flashSeconds > 0) {
+        this.flashTimer = window.setTimeout(() => {
+          this.flashTimer = null;
+          this.mutedKey = key;
+          this.setFlash('none');
+        }, this.flashSeconds * 1000);
+      }
+    }
+    this.setFlash(level);
+  }
+
+  private timerKey: string | null = null;
+
+  private clearFlashTimer(): void {
+    if (this.flashTimer !== null) window.clearTimeout(this.flashTimer);
+    this.flashTimer = null;
+    this.timerKey = null;
   }
 
   /**
@@ -87,4 +140,13 @@ export class AlertPresenter {
   private play(sound: AlertSound): void {
     this.audio.play(sound);
   }
+}
+
+/**
+ * 明滅を打ち切る単位。
+ * 同じ地震の続報では変わらず、震度や警報種別が上がれば変わる。
+ */
+function flashKey(eew: EewState | null, tsunami: TsunamiInfo | null, level: FlashLevel): string {
+  if (level === 'tsunami') return `tsunami:${tsunami ? tsunami.id : ''}`;
+  return `eew:${eew ? eew.id : ''}:${eew ? eew.alert : ''}:${eew ? eew.maxIntensity : ''}`;
 }

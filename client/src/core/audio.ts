@@ -1,3 +1,5 @@
+import { ALERT_SOUND_SECONDS } from '@quake-panel/shared';
+
 /**
  * 通知音。
  *
@@ -60,6 +62,8 @@ export class AlertAudio {
   private master: GainNode | null = null;
   private volume = 0.7;
   private active: AudioScheduledSourceNode[] = [];
+  /** 鳴り始めてから ALERT_SOUND_SECONDS で黙らせるためのタイマー */
+  private silenceTimer: number | null = null;
 
   get isUnlocked(): boolean {
     return this.context !== null && this.context.state === 'running';
@@ -97,6 +101,13 @@ export class AlertAudio {
     this.play(sound, 1);
   }
 
+  /**
+   * 鳴らす。
+   *
+   * 気づかせるのが目的なので、鳴り続ける必要はない。**最初の
+   * ALERT_SOUND_SECONDS 秒**を超える分は鳴らさず、超えた時点で黙らせる。
+   * 遠方の地震で長時間鳴り続けた、という実際の指摘に対する打ち切り。
+   */
   play(sound: AlertSound, repeatOverride?: number): void {
     const ctx = this.context;
     const master = this.master;
@@ -105,9 +116,12 @@ export class AlertAudio {
     const pattern = PATTERNS[sound];
     const repeat = repeatOverride ?? pattern.repeat;
     const base = ctx.currentTime + 0.02;
+    const deadline = base + ALERT_SOUND_SECONDS;
 
     for (let r = 0; r < repeat; r += 1) {
       const cycleStart = base + r * pattern.interval;
+      // 上限を超える繰り返しは最初から鳴らさない
+      if (cycleStart >= deadline) break;
       for (const tone of pattern.tones) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -126,10 +140,21 @@ export class AlertAudio {
         this.track(osc);
       }
     }
+
+    // 予定より長引いた場合 (連続で鳴らされた場合を含む) の保険
+    if (this.silenceTimer !== null) window.clearTimeout(this.silenceTimer);
+    this.silenceTimer = window.setTimeout(() => {
+      this.silenceTimer = null;
+      this.stop();
+    }, ALERT_SOUND_SECONDS * 1000);
   }
 
   /** キャンセル報などで即座に黙らせる */
   stop(): void {
+    if (this.silenceTimer !== null) {
+      window.clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
     for (const node of this.active) {
       try {
         node.stop();
