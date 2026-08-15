@@ -1,4 +1,4 @@
-import { HOME_LOCATION, KMONI_MAP } from '@quake-panel/shared';
+import { DEFAULT_SIDE_WIDTH, HOME_LOCATION, KMONI_MAP } from '@quake-panel/shared';
 import { ZOOM_RANGE, fullMapView, type MapViewState } from './core/mapView.js';
 
 /**
@@ -24,6 +24,10 @@ export interface Settings {
   tsunamiAreas: string[];
   /** 地図の表示位置。スクロール・拡大でそのまま更新される */
   view: MapViewState;
+  /** 地震情報パネルの幅 (横並びのとき)。境目のドラッグで更新される */
+  sideWidth: number;
+  /** 地震情報パネルの高さ (縦並びのとき)。0 は「まだ動かしていない」 */
+  sideHeight: number;
   /** 操作で地図を動かさない (キオスク運用向け) */
   locked: boolean;
 }
@@ -42,6 +46,8 @@ export const DEFAULT_SETTINGS: Settings = {
   tsunamiMode: 'auto',
   tsunamiAreas: [],
   view: fullMapView(),
+  sideWidth: DEFAULT_SIDE_WIDTH,
+  sideHeight: 0,
   locked: false,
 };
 
@@ -114,6 +120,9 @@ function readStored(storage: Storage | null): Settings {
       tsunamiMode: parsed.tsunamiMode === 'manual' ? 'manual' : 'auto',
       tsunamiAreas: readAreas(parsed.tsunamiAreas) ?? [...DEFAULT_SETTINGS.tsunamiAreas],
       view: readView(parsed.view, parsed.zoom),
+      // 画面に収まるかは表示時に判断するので、ここでは負の値だけ弾く
+      sideWidth: readSize(parsed.sideWidth, DEFAULT_SETTINGS.sideWidth),
+      sideHeight: readSize(parsed.sideHeight, DEFAULT_SETTINGS.sideHeight),
       locked: parsed.locked ?? DEFAULT_SETTINGS.locked,
     };
   } catch {
@@ -173,6 +182,12 @@ function readHome(value: unknown): { lat: number; lon: number } | null {
   if (typeof lat !== 'number' || typeof lon !== 'number') return null;
   if (!isLat(lat) || !isLon(lon)) return null;
   return { lat, lon };
+}
+
+function readSize(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : fallback;
 }
 
 function readAreas(value: unknown): string[] | null {

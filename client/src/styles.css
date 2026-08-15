@@ -156,9 +156,45 @@ body.cursor-hidden * {
 
 .main {
   display: grid;
-  /* 右側は幅固定。画面が広いときに履歴だけ間延びしても読みやすくならない。 */
-  grid-template-columns: 1fr 420px;
+  /* 右側の幅は境目のドラッグで決まる (--side-width)。画面が広いときに履歴だけ
+     間延びしても読みやすくならないので、既定は固定値のまま。 */
+  grid-template-columns: 1fr var(--split-thickness) var(--side-width, 420px);
   min-height: 0;
+  --split-thickness: 6px;
+}
+
+/* ---------- 地図と地震情報の境目 ---------- */
+
+.split {
+  position: relative;
+  background: var(--line);
+  cursor: col-resize;
+  /* 指で掴めるよう、見た目より広い当たり判定を持たせる */
+  touch-action: none;
+}
+
+.split::before {
+  content: '';
+  position: absolute;
+  /* 上下いっぱい・左右に張り出した当たり判定 */
+  inset: 0 -5px;
+}
+
+.split:hover,
+.split:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+/* ドラッグ中は境目を掴んだままなので、他所のホバーや選択を起こさない */
+.split--dragging {
+  background: var(--accent);
+}
+
+/* 「表示位置を固定」中は動かせない (キオスクで誤って動かさないため) */
+.split--locked {
+  cursor: default;
+  pointer-events: none;
 }
 
 .map-pane {
@@ -708,7 +744,8 @@ body.cursor-hidden * {
 @media (max-width: 1100px) {
   .main {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr auto;
+    /* 縦並びでは境目の上下ドラッグで高さが決まる。動かすまでは中身なりの高さ */
+    grid-template-rows: 1fr var(--split-thickness) var(--side-height, auto);
   }
 
   .side {
@@ -716,6 +753,19 @@ body.cursor-hidden * {
     border-top: 1px solid var(--line);
     max-height: 45vh;
     overflow-y: auto;
+  }
+
+  /* 高さを自分で決めたら、既定の 45vh 制限は外す */
+  .main--sized .side {
+    max-height: none;
+  }
+
+  .split {
+    cursor: row-resize;
+  }
+
+  .split::before {
+    inset: -5px 0;
   }
 }
 

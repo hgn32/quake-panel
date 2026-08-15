@@ -30,6 +30,7 @@ import { h, replaceChildren, requireElement } from './ui/dom.js';
 import { EewPanel } from './ui/eewPanel.js';
 import { QuakeList } from './ui/quakeList.js';
 import { SettingsPanel } from './ui/settingsPanel.js';
+import { Splitter } from './ui/splitter.js';
 import { StatusBar } from './ui/statusBar.js';
 import { TsunamiPanel } from './ui/tsunamiPanel.js';
 
@@ -74,6 +75,7 @@ export class App {
   private readonly tsunamiPanel: TsunamiPanel;
   private readonly quakeList: QuakeList;
   private readonly settingsPanel: SettingsPanel;
+  private readonly splitter: Splitter;
 
   private quakes: QuakeInfo[] = [];
   private tsunami: TsunamiInfo | null = null;
@@ -82,6 +84,7 @@ export class App {
   private cursorTimer: number | null = null;
   private testFlashTimer: number | null = null;
   private viewSaveTimer: number | null = null;
+  private sideSaveTimer: number | null = null;
 
   constructor() {
     this.alert = new AlertPresenter(requireElement('flash'));
@@ -131,6 +134,14 @@ export class App {
       },
     });
 
+    // 地図と地震情報の境目。動かした位置はその端末に保存する
+    this.splitter = new Splitter({
+      handle: requireElement('split'),
+      container: requireElement('main'),
+      getSize: () => ({ width: this.settings.sideWidth, height: this.settings.sideHeight }),
+      onResize: (patch) => this.handleSideResize(patch),
+    });
+
     this.connection = new ServerConnection({
       onEvent: (event) => this.handleEvent(event),
       onStateChange: (state) => this.handleConnectionState(state),
@@ -139,6 +150,10 @@ export class App {
 
   async start(): Promise<void> {
     this.renderLegend();
+    this.splitter.apply();
+    this.splitter.setLocked(this.settings.locked);
+    // 画面の回転や縮小で境目が画面外へ出ないよう、都度収め直す
+    window.addEventListener('resize', () => this.splitter.apply());
     this.startClock();
     this.setupAudioGate();
     this.setupCursorAutoHide();
@@ -245,6 +260,7 @@ export class App {
       home: this.settings.home,
     });
     this.updateMapControls();
+    this.splitter.setLocked(this.settings.locked);
     const homeMoved =
       before.home.lat !== this.settings.home.lat || before.home.lon !== this.settings.home.lon;
     if (homeMoved || before.tsunamiAreas !== this.settings.tsunamiAreas ||
@@ -359,6 +375,21 @@ export class App {
    * スクロール・拡大のたびに保存すると書き込みが多すぎるので、
    * 手が止まってからまとめて保存する。
    */
+  /**
+   * 境目のドラッグ。
+   *
+   * 動かしている間は画面へ反映するだけにして、止まってから保存する
+   * (pointermove ごとに localStorage へ書くと重い)。
+   */
+  private handleSideResize(patch: { sideWidth?: number; sideHeight?: number }): void {
+    this.settings = { ...this.settings, ...patch };
+    if (this.sideSaveTimer !== null) window.clearTimeout(this.sideSaveTimer);
+    this.sideSaveTimer = window.setTimeout(() => {
+      this.sideSaveTimer = null;
+      this.settings = this.store.update(patch);
+    }, 400);
+  }
+
   private saveViewLater(view: MapViewState): void {
     if (this.viewSaveTimer !== null) window.clearTimeout(this.viewSaveTimer);
     this.viewSaveTimer = window.setTimeout(() => {
