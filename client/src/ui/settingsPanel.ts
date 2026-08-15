@@ -96,56 +96,137 @@ export class SettingsPanel {
     this.deps.modal.hidden = true;
   }
 
+  /**
+   * 章立てで組む。
+   *
+   * 項目が増えて一列に並べると、何を触っているのか分からなくなる。
+   * 「音と明滅」「地図」「利用地」「地震情報」の 4 つに分け、各章の中は
+   * 「ラベル + 説明」と「操作部」の 2 列で揃える。
+   */
   private render(): void {
     const settings = this.deps.getSettings();
     replaceChildren(
       this.deps.form,
-      this.radioRow(
-        'EEW の通知範囲',
-        'この端末で音と明滅を出す範囲。サーバーは常に予報も警報も受信しています。',
-        [
-          { value: 'all', label: '予報から通知', checked: settings.notifyForecast },
-          { value: 'warning', label: '警報のみ通知', checked: !settings.notifyForecast },
-        ],
-        (value) => this.deps.onChange({ notifyForecast: value === 'all' }),
+      this.section(
+        '音と明滅',
+        'この端末での気づかせ方。サーバーは常に予報も警報も受信しています。',
+        this.radioRow(
+          'EEW の通知範囲',
+          null,
+          [
+            { value: 'all', label: '予報から通知', checked: settings.notifyForecast },
+            { value: 'warning', label: '警報のみ通知', checked: !settings.notifyForecast },
+          ],
+          (value) => this.deps.onChange({ notifyForecast: value === 'all' }),
+        ),
+        this.sliderRow(
+          '音量',
+          null,
+          { value: settings.volume, min: 0, max: 1, step: 0.05 },
+          (value) => `${Math.round(value * 100)}%`,
+          (value) => this.deps.onChange({ volume: value }),
+        ),
+        this.secondsRow(
+          '音を鳴らす時間',
+          '発表が続いていても、この時間で音だけ止めます。',
+          settings.soundSeconds,
+          [
+            { value: 5, label: '5秒' },
+            { value: 10, label: '10秒' },
+            { value: 20, label: '20秒' },
+            { value: 30, label: '30秒' },
+            { value: 0, label: '鳴らし切る' },
+          ],
+          (value) => this.deps.onChange({ soundSeconds: value }),
+        ),
+        this.secondsRow(
+          '画面明滅を続ける時間',
+          '同じく、この時間で明滅だけ止めます。発表のパネル表示は消えません。',
+          settings.flashSeconds,
+          [
+            { value: 15, label: '15秒' },
+            { value: 30, label: '30秒' },
+            { value: 60, label: '60秒' },
+            { value: 180, label: '3分' },
+            { value: 0, label: '止めない' },
+          ],
+          (value) => this.deps.onChange({ flashSeconds: value }),
+        ),
+        this.row(
+          'テスト',
+          '実際の警報と同じ音と画面明滅を数秒だけ出します。',
+          this.button('音と明滅をテスト', () => {
+            // 明滅は画面全体に出るので、確認できるよう設定画面を閉じる
+            this.close();
+            this.deps.onTest();
+          }),
+        ),
       ),
-      this.sliderRow(
-        '音量',
+      this.section(
+        '地図',
         null,
-        { value: settings.volume, min: 0, max: 1, step: 0.05 },
-        (value) => `${Math.round(value * 100)}%`,
-        (value) => this.deps.onChange({ volume: value }),
+        this.layerRow(settings),
+        this.checkboxRow(
+          '観測点を発光表示',
+          '拡大時の粗さが目立たなくなります。動作が重い場合は切ってください。',
+          settings.glow,
+          (checked) => this.deps.onChange({ glow: checked }),
+        ),
+        this.checkboxRow(
+          '表示位置を固定',
+          '地図の操作と、地震情報との境目のドラッグを受け付けなくします。常時表示の端末向け。',
+          settings.locked,
+          (checked) => this.deps.onChange({ locked: checked }),
+        ),
       ),
-      this.row(
-        'テスト',
-        '実際の警報と同じ音と画面明滅を数秒だけ出します。',
-        this.button('音と明滅をテスト', () => {
-          // 明滅は画面全体に出るので、確認できるよう設定画面を閉じる
-          this.close();
-          this.deps.onTest();
-        }),
+      this.section(
+        '利用地',
+        '地図の中心と、津波予報区の自動判定に使います。',
+        this.homeRow(settings),
+        this.tsunamiRow(settings),
       ),
-      this.layerRow(settings),
-      this.homeRow(settings),
-      this.tsunamiRow(settings),
-      this.quakeFilterRow(settings),
-      this.flashRow(settings),
-      this.checkboxRow(
-        '表示位置を固定',
-        '地図のホイール操作とドラッグを受け付けなくします。常時表示の端末で誤って動かさないため。',
-        settings.locked,
-        (checked) => this.deps.onChange({ locked: checked }),
-      ),
-      this.checkboxRow(
-        '観測点を発光表示',
-        '拡大時の粗さが目立たなくなります。動作が重い場合は切ってください。',
-        settings.glow,
-        (checked) => this.deps.onChange({ glow: checked }),
-      ),
-      this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
-        this.deps.onChange({ historyCount: value }),
+      this.section(
+        '地震情報',
+        null,
+        this.quakeFilterRow(settings),
+        this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
+          this.deps.onChange({ historyCount: value }),
+        ),
       ),
     );
+  }
+
+  /** 章。見出しと、必要なら章全体の説明を付ける。 */
+  private section(title: string, hint: string | null, ...rows: HTMLElement[]): HTMLElement {
+    return h(
+      'section',
+      { class: 'settings__section' },
+      h(
+        'div',
+        { class: 'settings__section-head' },
+        h('h3', { class: 'settings__section-title', text: title }),
+        hint ? h('span', { class: 'settings__hint', text: hint }) : null,
+      ),
+      ...rows,
+    );
+  }
+
+  /** 秒数の選択。音と明滅で形をそろえる。 */
+  private secondsRow(
+    label: string,
+    hint: string | null,
+    value: number,
+    choices: ReadonlyArray<{ value: number; label: string }>,
+    onSelect: (value: number) => void,
+  ): HTMLElement {
+    const select = h('select', { class: 'settings__select' });
+    for (const choice of choices) {
+      const option = h('option', { value: String(choice.value), text: choice.label });
+      option.selected = choice.value === value;
+      select.append(option);
+    }
+    select.addEventListener('change', () => onSelect(Number(select.value)));
+    return this.row(label, hint, select);
   }
 
   /** 地図に出す指標。サーバーの既定に従うか、この端末だけ変えるか。 */
@@ -159,10 +240,6 @@ export class SettingsPanel {
         checked: settings.layer === layer,
       })),
     ];
-    const note = h('span', {
-      class: 'settings__hint',
-      text: KMONI_LAYER_NOTES[settings.layer ?? server],
-    });
     return h(
       'div',
       { class: 'settings__row' },
@@ -174,12 +251,20 @@ export class SettingsPanel {
           class: 'settings__hint',
           text: 'この端末だけ変えられます。既定以外を選ぶと、その分だけサーバーが追加で取得します。',
         }),
-        note,
       ),
-      this.radioGroup('kmoni-layer', options, (value) => {
-        this.deps.onChange({ layer: value === '' ? null : (value as KmoniLayer) });
-        this.render();
-      }),
+      h(
+        'div',
+        { class: 'settings__stack' },
+        this.radioGroup('kmoni-layer', options, (value) => {
+          this.deps.onChange({ layer: value === '' ? null : (value as KmoniLayer) });
+          this.render();
+        }),
+        // 選んだものの性格は操作部の下に出す (ラベル側に説明を 2 つ積むと窮屈)
+        h('span', {
+          class: 'settings__hint settings__hint--note',
+          text: KMONI_LAYER_NOTES[settings.layer ?? server],
+        }),
+      ),
     );
   }
 
@@ -235,30 +320,6 @@ export class SettingsPanel {
           h('span', { text: '利用地の都道府県で揺れたものだけ' }),
         ),
       ),
-    );
-  }
-
-  /** 明滅を続ける上限。遠方の地震で光り続けるのを避ける。 */
-  private flashRow(settings: Settings): HTMLElement {
-    const select = h('select', { class: 'settings__select' });
-    for (const choice of [
-      { value: 15, label: '15秒' },
-      { value: 30, label: '30秒' },
-      { value: 60, label: '60秒' },
-      { value: 180, label: '3分' },
-      { value: 0, label: '止めない' },
-    ]) {
-      const option = h('option', { value: String(choice.value), text: choice.label });
-      option.selected = choice.value === settings.flashSeconds;
-      select.append(option);
-    }
-    select.addEventListener('change', () =>
-      this.deps.onChange({ flashSeconds: Number(select.value) }),
-    );
-    return this.row(
-      '画面明滅を続ける時間',
-      '発表が続いていても、この時間で明滅だけ止めます (音は最初の 10 秒で止まります)。',
-      select,
     );
   }
 

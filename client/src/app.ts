@@ -159,6 +159,7 @@ export class App {
   async start(): Promise<void> {
     this.renderLegend();
     this.alert.setFlashSeconds(this.settings.flashSeconds);
+    this.alert.audio.setMaxSeconds(this.settings.soundSeconds);
     this.splitter.apply();
     this.splitter.setLocked(this.settings.locked);
     // 画面の回転や縮小で境目が画面外へ出ないよう、都度収め直す
@@ -296,6 +297,7 @@ export class App {
     this.updateMapControls();
     this.splitter.setLocked(this.settings.locked);
     this.alert.setFlashSeconds(this.settings.flashSeconds);
+    this.alert.audio.setMaxSeconds(this.settings.soundSeconds);
     this.applyLayer();
     const homeMoved =
       before.home.lat !== this.settings.home.lat || before.home.lon !== this.settings.home.lon;

@@ -663,31 +663,77 @@ body.cursor-hidden * {
 }
 
 .modal__body {
-  width: min(560px, 92vw);
-  /* 中身が広がっても横スクロールさせない */
-  overflow-x: hidden;
-  max-height: 86vh;
-  overflow-y: auto;
+  /*
+   * 見出しと「保存 / 取消」は常に見えるようにして、設定の並びだけを
+   * スクロールさせる。項目が増えても「保存を探して延々スクロール」にならない。
+   */
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: min(720px, 94vw);
+  max-height: 88vh;
+  min-height: 0;
+  overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 20px 24px;
+  border-radius: 16px;
+  box-shadow: 0 24px 64px #00000080;
   cursor: auto;
 }
 
 .modal__title {
-  margin: 0 0 12px;
+  margin: 0;
+  padding: 18px 24px 14px;
   font-size: 18px;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 設定の並び (ここだけがスクロールする) */
+.settings {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 24px 8px;
+}
+
+.settings__section {
+  padding: 14px 0 4px;
+}
+
+.settings__section + .settings__section {
+  border-top: 1px solid var(--line);
+}
+
+.settings__section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 2px;
+}
+
+.settings__section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--accent);
 }
 
 .settings__row {
   display: grid;
-  /* ラベル側は縮んでよい。狭い画面で操作部がはみ出すほうが困る。 */
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
+  /*
+   * ラベル側には下限を置く。操作部を `auto` にすると、選択肢が多い行
+   * (指標のラジオ 5 個など) で操作部が最大幅を要求し、ラベルが 1 文字幅まで
+   * 潰れて縦書きになる。操作部を縮められるようにして、中で折り返させる。
+   */
+  grid-template-columns: minmax(190px, 1fr) minmax(0, auto);
+  gap: 10px 20px;
+  align-items: start;
+  padding: 10px 0;
+}
+
+.settings__row + .settings__row {
+  border-top: 1px solid #1a2537;
 }
 
 .settings__label {
@@ -695,6 +741,9 @@ body.cursor-hidden * {
   flex-direction: column;
   gap: 3px;
   font-size: 14px;
+  /* 説明が長い行でも、ラベル自体は折り返して読める幅を保つ */
+  min-width: 0;
+  padding-top: 3px;
 }
 
 .settings__hint {
@@ -708,13 +757,37 @@ body.cursor-hidden * {
   justify-content: flex-end;
   /* 幅が足りなければ折り返す (押し出して画面外に出さない) */
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+/* 選択肢はひとつの塊として見せる (どこまでが 1 項目か分かるように) */
+.settings__option {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #142033;
+  white-space: nowrap;
+}
+
+.settings__option:hover {
+  border-color: var(--accent);
+}
+
+.settings__option:has(input:checked) {
+  border-color: var(--accent);
+  background: #16324a;
+}
+
+.settings__option:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .settings__option {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 13px;
   cursor: pointer;
 }
@@ -908,7 +981,9 @@ body.cursor-hidden * {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 14px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, #101725, #0d1421);
 }
 
 /* 履歴の展開 */
@@ -974,6 +1049,13 @@ body.cursor-hidden * {
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
+  min-width: 0;
+}
+
+/* 操作部の下に置く補足。右寄せだと読みづらいので行末を揃える */
+.settings__hint--note {
+  text-align: right;
+  max-width: 34ch;
 }
 
 /* 地図の凡例はリアルタイム震度の連続スケール (段階の凡例ではない) */
