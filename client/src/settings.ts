@@ -1,4 +1,14 @@
-import { HOME_LOCATION, KMONI_MAP } from '@quake-panel/shared';
+import {
+  DEFAULT_FLASH_SECONDS,
+  DEFAULT_QUAKE_FILTER,
+  DEFAULT_SIDE_WIDTH,
+  HOME_LOCATION,
+  KMONI_MAP,
+  clampFlashSeconds,
+  parseKmoniLayer,
+  type KmoniLayer,
+  type QuakeFilter,
+} from '@quake-panel/shared';
 import { ZOOM_RANGE, fullMapView, type MapViewState } from './core/mapView.js';
 
 /**
@@ -24,8 +34,18 @@ export interface Settings {
   tsunamiAreas: string[];
   /** 地図の表示位置。スクロール・拡大でそのまま更新される */
   view: MapViewState;
+  /** 地震情報パネルの幅 (横並びのとき)。境目のドラッグで更新される */
+  sideWidth: number;
+  /** 地震情報パネルの高さ (縦並びのとき)。0 は「まだ動かしていない」 */
+  sideHeight: number;
   /** 操作で地図を動かさない (キオスク運用向け) */
   locked: boolean;
+  /** 表示する強震モニタの指標。null はサーバーの既定に従う */
+  layer: KmoniLayer | null;
+  /** 明滅を続ける上限 (秒)。0 なら止めない */
+  flashSeconds: number;
+  /** 地震情報の絞り込み */
+  quakeFilter: QuakeFilter;
 }
 
 /** URL で上書きできる設定。ここに無いものは端末の設定が常に勝つ。 */
@@ -42,7 +62,12 @@ export const DEFAULT_SETTINGS: Settings = {
   tsunamiMode: 'auto',
   tsunamiAreas: [],
   view: fullMapView(),
+  sideWidth: DEFAULT_SIDE_WIDTH,
+  sideHeight: 0,
   locked: false,
+  layer: null,
+  flashSeconds: DEFAULT_FLASH_SECONDS,
+  quakeFilter: { ...DEFAULT_QUAKE_FILTER },
 };
 
 /**
@@ -114,7 +139,13 @@ function readStored(storage: Storage | null): Settings {
       tsunamiMode: parsed.tsunamiMode === 'manual' ? 'manual' : 'auto',
       tsunamiAreas: readAreas(parsed.tsunamiAreas) ?? [...DEFAULT_SETTINGS.tsunamiAreas],
       view: readView(parsed.view, parsed.zoom),
+      // 画面に収まるかは表示時に判断するので、ここでは負の値だけ弾く
+      sideWidth: readSize(parsed.sideWidth, DEFAULT_SETTINGS.sideWidth),
+      sideHeight: readSize(parsed.sideHeight, DEFAULT_SETTINGS.sideHeight),
       locked: parsed.locked ?? DEFAULT_SETTINGS.locked,
+      layer: parseKmoniLayer(parsed.layer),
+      flashSeconds: clampFlashSeconds(parsed.flashSeconds ?? DEFAULT_SETTINGS.flashSeconds),
+      quakeFilter: readFilter(parsed.quakeFilter),
     };
   } catch {
     // 壊れた値が入っていても起動を止めない
@@ -173,6 +204,23 @@ function readHome(value: unknown): { lat: number; lon: number } | null {
   if (typeof lat !== 'number' || typeof lon !== 'number') return null;
   if (!isLat(lat) || !isLon(lon)) return null;
   return { lat, lon };
+}
+
+function readFilter(value: Partial<QuakeFilter> | undefined): QuakeFilter {
+  if (typeof value !== 'object' || value === null) return { ...DEFAULT_QUAKE_FILTER };
+  return {
+    minIntensity:
+      typeof value.minIntensity === 'number' && Number.isFinite(value.minIntensity)
+        ? value.minIntensity
+        : DEFAULT_QUAKE_FILTER.minIntensity,
+    homePrefectureOnly: value.homePrefectureOnly === true,
+  };
+}
+
+function readSize(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : fallback;
 }
 
 function readAreas(value: unknown): string[] | null {

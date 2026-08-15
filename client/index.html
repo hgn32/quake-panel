@@ -31,7 +31,7 @@
         </div>
       </header>
 
-      <main class="main">
+      <main id="main" class="main">
         <section class="map-pane">
           <canvas id="map" class="map-canvas"></canvas>
           <div id="map-notice" class="map-notice" hidden></div>
@@ -58,6 +58,15 @@
           </div>
           <div class="map-legend" id="map-legend"></div>
         </section>
+
+        <!-- 地図と地震情報の境目。ドラッグで動かした位置はその端末に保存する -->
+        <div
+          id="split"
+          class="split"
+          role="separator"
+          tabindex="0"
+          aria-label="地図と地震情報の境目 (ドラッグまたは矢印キーで移動、ダブルクリックで既定に戻す)"
+        ></div>
 
         <aside class="side">
           <section id="eew-panel" class="panel panel--eew" hidden></section>

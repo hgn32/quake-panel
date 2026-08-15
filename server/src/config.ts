@@ -1,3 +1,4 @@
+import { DEFAULT_KMONI_LAYER, parseKmoniLayer, type KmoniLayer } from '@quake-panel/shared';
 
 const num = (value: string | undefined, fallback: number): number => {
   if (value === undefined || value.trim() === '') return fallback;
@@ -26,6 +27,11 @@ export interface Config {
   staticDir: string;
   kmoni: {
     baseUrl: string;
+    /**
+     * 既定で取得・表示する指標。端末が別の指標を選んだときだけ、その分も取りに行く。
+     * 上流への負荷に直結するのでサーバー設定に置く (§2)。
+     */
+    layer: KmoniLayer;
     /** 平常時の画像取得間隔 (ms)。実測で kmoni は毎秒更新 (docs/kmoni-endpoints.md)。 */
     idleFrameIntervalMs: number;
     /** EEW 発表中の画像取得間隔 (ms) */
@@ -82,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     staticDir: str(env['STATIC_DIR'], 'public'),
     kmoni: {
       baseUrl: str(env['KMONI_BASE_URL'], 'http://www.kmoni.bosai.go.jp'),
+      layer: parseKmoniLayer(env['KMONI_LAYER']) ?? DEFAULT_KMONI_LAYER,
       // 秒で受けて ms に直す。上流への負荷を決める値なので、
       // 端末ごとではなくサーバーの設定として持つ (§2)。
       idleFrameIntervalMs: sec(env['KMONI_IDLE_FRAME_INTERVAL_SEC'], 1) * 1000,

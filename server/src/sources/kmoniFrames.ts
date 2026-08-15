@@ -1,8 +1,10 @@
 import {
   fromKmoniTimestamp,
   kmoniDatePart,
+  kmoniLayerPath,
   toKmoniTimestamp,
   type FrameNotice,
+  type KmoniLayer,
 } from '@quake-panel/shared';
 import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
@@ -17,7 +19,16 @@ const LAG_DECAY_AFTER_SUCCESSES = 30;
 /** 追加待ちの上限。これを超えても取れないなら kmoni 側の問題として劣化モードへ。 */
 const MAX_EXTRA_LAG_SEC = 6;
 
-export type FrameLayer = 'realtime' | 'psWave' | 'estShindo';
+/**
+ * 取得・保持する画像の種類。
+ *
+ * 観測画像は指標ごとに分かれる (jma / acmap / …)。既定の指標は設定で決まり、
+ * それ以外は「実際に見ている端末があるときだけ」取りに行く。
+ */
+export type FrameLayer = KmoniLayer | 'psWave' | 'estShindo';
+
+/** 端末から要求された指標を、何秒間「見られている」とみなすか */
+const LAYER_ACTIVE_MS = 60_000;
 
 export interface CachedImage {
   body: Buffer;
@@ -44,6 +55,10 @@ export class KmoniFrameWorker {
   private readonly cache = new Map<string, CachedImage>();
   /** EEW 発表中のみ補助レイヤを取りに行く */
   private eewActive = false;
+  /** 既定以外の指標。端末が実際に見ている間だけ取りに行く (層 → 最後に要求された時刻) */
+  private readonly requestedLayers = new Map<KmoniLayer, number>();
+  /** 同じ画像を同時に何度も取りに行かないための止め輪 */
+  private readonly inflight = new Map<string, Promise<CachedImage | null>>();
 
   constructor(
     private readonly config: Config,
@@ -63,6 +78,61 @@ export class KmoniFrameWorker {
 
   setEewActive(active: boolean): void {
     this.eewActive = active;
+  }
+
+  /** サーバーが既定で取りに行く指標 (アドオンの設定) */
+  get defaultLayer(): KmoniLayer {
+    return this.config.kmoni.layer;
+  }
+
+  /**
+   * 端末が指標つきで画像を要求してきたときの入口。
+   *
+   * 既定以外の指標は普段取っていないので、初回だけここで取りに行き、
+   * 以後しばらくは毎秒の取得対象に加える (見ている端末がいなくなれば戻る)。
+   */
+  requestImage(layer: KmoniLayer, timestamp: string): Promise<CachedImage | null> {
+    if (layer !== this.config.kmoni.layer) this.requestedLayers.set(layer, Date.now());
+    const cached = this.getImage(layer, timestamp);
+    if (cached) return Promise.resolve(cached);
+    return this.fetchLayer(layer, timestamp);
+  }
+
+  /** いま毎秒取りに行く指標 (既定 + 見られているもの) */
+  private activeLayers(): KmoniLayer[] {
+    const now = Date.now();
+    const extra = [...this.requestedLayers.entries()]
+      .filter(([layer, at]) => {
+        if (now - at <= LAYER_ACTIVE_MS) return true;
+        this.requestedLayers.delete(layer);
+        return false;
+      })
+      .map(([layer]) => layer);
+    return [this.config.kmoni.layer, ...extra.filter((layer) => layer !== this.config.kmoni.layer)];
+  }
+
+  /** 同じ画像への同時要求は 1 本にまとめる */
+  private fetchLayer(layer: KmoniLayer, timestamp: string): Promise<CachedImage | null> {
+    const key = cacheKey(layer, timestamp);
+    const running = this.inflight.get(key);
+    if (running) return running;
+    const task = fetchBinary(this.frameUrl(layer, timestamp), {
+      timeoutMs: this.config.kmoni.requestTimeoutMs,
+    })
+      .then((res) => {
+        if (!res) return null;
+        this.store(layer, timestamp, res.body, res.contentType);
+        return this.getImage(layer, timestamp);
+      })
+      .catch((error: Error) => {
+        log.debug(`${layer} fetch failed: ${describeError(error)}`);
+        return null;
+      })
+      .finally(() => {
+        this.inflight.delete(key);
+      });
+    this.inflight.set(key, task);
+    return task;
   }
 
   getImage(layer: FrameLayer, timestamp: string): CachedImage | null {
@@ -113,7 +183,7 @@ export class KmoniFrameWorker {
     const timestamp = toKmoniTimestamp(target);
     if (timestamp === this.lastTimestamp) return;
 
-    const realtime = await fetchBinary(this.realtimeUrl(timestamp), {
+    const realtime = await fetchBinary(this.frameUrl(this.config.kmoni.layer, timestamp), {
       timeoutMs: this.config.kmoni.requestTimeoutMs,
     });
 
@@ -137,7 +207,14 @@ export class KmoniFrameWorker {
       this.successStreak = 0;
     }
 
-    this.store('realtime', timestamp, realtime.body, realtime.contentType);
+    this.store(this.config.kmoni.layer, timestamp, realtime.body, realtime.contentType);
+
+    // 既定以外の指標を見ている端末がいれば、その分も同じ時刻で揃えておく
+    await Promise.all(
+      this.activeLayers()
+        .filter((layer) => layer !== this.config.kmoni.layer)
+        .map((layer) => this.fetchLayer(layer, timestamp)),
+    );
 
     const layers = { realtime: true, psWave: false, estShindo: false };
     if (this.eewActive) {
@@ -194,9 +271,10 @@ export class KmoniFrameWorker {
     for (const key of keys.slice(0, this.cache.size - limit)) this.cache.delete(key);
   }
 
-  private realtimeUrl(timestamp: string): string {
+  private frameUrl(layer: KmoniLayer, timestamp: string): string {
     const date = kmoniDatePart(timestamp);
-    return `${this.config.kmoni.baseUrl}/data/map_img/RealTimeImg/jma_s/${date}/${timestamp}.jma_s.gif`;
+    const path = kmoniLayerPath(layer);
+    return `${this.config.kmoni.baseUrl}/data/map_img/RealTimeImg/${path}/${date}/${timestamp}.${path}.gif`;
   }
 
   private psWaveUrl(timestamp: string): string {

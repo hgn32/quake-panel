@@ -1,4 +1,4 @@
-import { ENDPOINTS, type FrameNotice } from '@quake-panel/shared';
+import { DEFAULT_KMONI_LAYER, ENDPOINTS, type KmoniLayer, type FrameNotice } from '@quake-panel/shared';
 import { resolveUrl } from './urls.js';
 
 export interface FrameImages {
@@ -23,8 +23,19 @@ export class FrameStream {
   private inflight: AbortController | null = null;
   private pending: FrameNotice | null = null;
   private loading = false;
+  /** 表示する指標。設定で切り替わる (サーバーは要求された指標だけ取りに行く)。 */
+  private layer: KmoniLayer = DEFAULT_KMONI_LAYER;
 
   constructor(private readonly onFrame: (frame: FrameImages) => void) {}
+
+  /** 指標を切り替える。次の通知から新しい指標で取りに行く。 */
+  setLayer(layer: KmoniLayer): void {
+    this.layer = layer;
+  }
+
+  getLayer(): KmoniLayer {
+    return this.layer;
+  }
 
   /** WS から新フレーム通知を受け取る */
   accept(notice: FrameNotice): void {
@@ -64,7 +75,7 @@ export class FrameStream {
 
     try {
       const [realtime, psWave, estShindo] = await Promise.all([
-        loadBitmap(resolveUrl(ENDPOINTS.frame(notice.timestamp)), controller.signal),
+        loadBitmap(resolveUrl(ENDPOINTS.frame(this.layer, notice.timestamp)), controller.signal),
         notice.layers.psWave
           ? loadBitmap(resolveUrl(ENDPOINTS.psWave(notice.timestamp)), controller.signal)
           : Promise.resolve(null),

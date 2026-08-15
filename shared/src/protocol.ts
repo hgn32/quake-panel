@@ -1,3 +1,4 @@
+import type { KmoniLayer } from './kmoniLayer.js';
 import type {
   EewDetection,
   EewState,
@@ -54,10 +55,10 @@ export const ENDPOINTS = {
   /** Home Assistant に設定されている自宅の緯度経度 (未設定なら 204) */
   homeLocation: '/api/home-location',
   health: '/healthz',
-  /** 最新のリアルタイム震度画像 */
+  /** 最新の観測画像 (サーバーの既定指標) */
   latestFrame: '/kmoni/latest.gif',
-  /** タイムスタンプ指定のリアルタイム震度画像 */
-  frame: (timestamp: string) => `/kmoni/frame/${timestamp}.gif`,
+  /** タイムスタンプと指標を指定した観測画像 */
+  frame: (layer: KmoniLayer, timestamp: string) => `/kmoni/frame/${layer}/${timestamp}.gif`,
   /** EEW 発表中の予測円 */
   psWave: (timestamp: string) => `/kmoni/pswave/${timestamp}.gif`,
   /** EEW 発表中の予想震度 */
