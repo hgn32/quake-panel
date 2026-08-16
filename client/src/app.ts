@@ -1,10 +1,13 @@
 import {
   KMONI_LAYER_LABELS,
   applyHomeAreas,
+  eewRelevance,
   formatJstClock,
   matchesQuakeFilter,
+  tsunamiAlertRank,
   tsunamiAreasForPrefecture,
   type KmoniLayer,
+  type EewRelevance,
   type EewState,
   type HealthState,
   type QuakeInfo,
@@ -184,8 +187,11 @@ export class App {
         this.applyEew(event.eew);
         break;
       case 'eewDetection':
-        // 詳細不明の第一報。EEW 本体が来ていないときだけ短く鳴らす。
-        if (!this.eew) this.alert.applyDetection(event.detection.id);
+        // 詳細不明の第一報。554 には位置情報が無く関連判定ができないため、
+        // 利用地で絞るモードでは鳴らさず、数秒後の EEW 本体の判定に任せる。
+        if (!this.eew && this.settings.eewScope === 'national') {
+          this.alert.applyDetection(event.detection.id);
+        }
         break;
       case 'quake':
         this.quakes = [event.quake, ...this.quakes.filter((q) => q.id !== event.quake.id)];
@@ -222,9 +228,10 @@ export class App {
 
   private applyEew(eew: EewState | null): void {
     this.eew = eew;
-    this.eewPanel.update(eew);
+    const relevance = this.eewRelevanceNow(eew);
+    this.eewPanel.update(eew, relevance);
     this.mapView.setEew(eew);
-    this.alert.applyEewSound(eew, this.settings.notifyForecast);
+    this.alert.applyEewSound(eew, this.settings.notifyForecast, relevance);
     this.refreshFlash();
   }
 
@@ -234,7 +241,8 @@ export class App {
     this.tsunami = tsunami;
     this.tsunamiPanel.update(tsunami);
     this.mapView.setTsunami(tsunami);
-    this.alert.applyTsunamiSound(tsunami);
+    const rank = this.tsunamiRankNow(tsunami);
+    this.alert.applyTsunamiSound(tsunami, rank);
     this.refreshFlash();
   }
 
@@ -243,7 +251,30 @@ export class App {
    * (EEW が消えたあとに津波の明滅へ戻す、といった遷移をここで一括して扱う)
    */
   private refreshFlash(): void {
-    this.alert.applyFlash(this.eew, this.tsunami, this.settings.notifyForecast);
+    this.alert.applyFlash(
+      this.eew,
+      this.eewRelevanceNow(this.eew),
+      this.tsunami,
+      this.tsunamiRankNow(this.tsunami),
+      this.settings.notifyForecast,
+    );
+  }
+
+  /** 利用地の都道府県。地図の県ポリゴンから引く (海上などは null) */
+  private homePrefecture(): string | null {
+    return this.mapView.prefectureAt(this.settings.home.lat, this.settings.home.lon);
+  }
+
+  /** この EEW の利用地にとってのランク。全国モードでは気象庁の種別をそのまま使う (従来挙動) */
+  private eewRelevanceNow(eew: EewState | null): EewRelevance {
+    if (!eew) return 'none';
+    if (this.settings.eewScope === 'national') return eew.alert;
+    return eewRelevance(eew, this.homePrefecture(), this.settings.home, this.settings.eewRadiusKm);
+  }
+
+  /** この津波予報で音・明滅を出す強さ (0 なら出さない) */
+  private tsunamiRankNow(tsunami: TsunamiInfo | null): number {
+    return tsunamiAlertRank(tsunami, this.settings.tsunamiAlertMin, this.settings.tsunamiNationalMajor);
   }
 
   /** いま表示する指標 (端末の選択) */
@@ -264,7 +295,7 @@ export class App {
 
   /** 絞り込みを通した地震情報 */
   private visibleQuakes(): QuakeInfo[] {
-    const prefecture = this.mapView.prefectureAt(this.settings.home.lat, this.settings.home.lon);
+    const prefecture = this.homePrefecture();
     return this.quakes.filter((quake) =>
       matchesQuakeFilter(quake, this.settings.quakeFilter, prefecture),
     );
@@ -290,8 +321,22 @@ export class App {
     this.applyLayer();
     const homeMoved =
       before.home.lat !== this.settings.home.lat || before.home.lon !== this.settings.home.lon;
-    if (homeMoved || before.tsunamiAreas !== this.settings.tsunamiAreas ||
-        before.tsunamiMode !== this.settings.tsunamiMode) {
+    if (
+      homeMoved ||
+      before.eewScope !== this.settings.eewScope ||
+      before.eewRadiusKm !== this.settings.eewRadiusKm ||
+      before.notifyForecast !== this.settings.notifyForecast
+    ) {
+      // 関連度とパネル表記を引き直す (表示中の EEW にも即座に効かせる)
+      this.applyEew(this.eew);
+    }
+    if (
+      homeMoved ||
+      before.tsunamiAreas !== this.settings.tsunamiAreas ||
+      before.tsunamiMode !== this.settings.tsunamiMode ||
+      before.tsunamiAlertMin !== this.settings.tsunamiAlertMin ||
+      before.tsunamiNationalMajor !== this.settings.tsunamiNationalMajor
+    ) {
       // 印の付け直し (表示中の予報にも即座に効かせる)
       this.applyTsunami(this.tsunami);
     }
@@ -307,9 +352,7 @@ export class App {
     if (this.settings.tsunamiMode === 'manual') {
       return this.settings.tsunamiAreas.flatMap((area) => tsunamiAreasForPrefecture(area));
     }
-    return tsunamiAreasForPrefecture(
-      this.mapView.prefectureAt(this.settings.home.lat, this.settings.home.lon),
-    );
+    return tsunamiAreasForPrefecture(this.homePrefecture());
   }
 
   /**

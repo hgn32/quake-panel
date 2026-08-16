@@ -3,6 +3,7 @@ import {
   intensityColor,
   intensityLabel,
   intensityTextColor,
+  type EewRelevance,
   type EewState,
 } from '@quake-panel/shared';
 import { h, replaceChildren } from './dom.js';
@@ -18,11 +19,14 @@ import { h, replaceChildren } from './dom.js';
 export class EewPanel {
   private timer: number | null = null;
   private current: EewState | null = null;
+  /** この EEW の利用地にとってのランク。'none' なら音・明滅を出していない */
+  private relevance: EewRelevance = 'none';
 
   constructor(private readonly root: HTMLElement) {}
 
-  update(eew: EewState | null): void {
+  update(eew: EewState | null, relevance: EewRelevance): void {
     this.current = eew;
+    this.relevance = relevance;
     if (!eew) {
       this.root.hidden = true;
       this.stopTicker();
@@ -70,6 +74,8 @@ export class EewPanel {
       eew.isAssumption ? '仮定震源' : null,
       eew.isFinal ? '最終報' : eew.reportNumber > 0 ? `第${eew.reportNumber}報` : null,
       eew.source === 'both' ? '強震モニタ+P2P' : eew.source === 'p2p' ? 'P2P' : '強震モニタ',
+      // 音・明滅を出していない理由が画面で分かるように (全国モードでは常に none 以外)
+      this.relevance === 'none' ? '利用地対象外' : null,
     ].filter((t): t is string => t !== null);
 
     replaceChildren(

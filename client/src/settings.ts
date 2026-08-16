@@ -5,13 +5,16 @@ import {
   DEFAULT_SOUND_SECONDS,
   DEFAULT_QUAKE_FILTER,
   DEFAULT_SIDE_WIDTH,
+  EEW_RADIUS_CHOICES,
   HOME_LOCATION,
   KMONI_MAP,
+  TSUNAMI_ALERT_MIN_CHOICES,
   clampFlashSeconds,
   clampSoundSeconds,
   parseKmoniLayer,
   type KmoniLayer,
   type QuakeFilter,
+  type TsunamiAlertMin,
 } from '@quake-panel/shared';
 import { ZOOM_RANGE, fullMapView, type MapViewState } from './core/mapView.js';
 
@@ -21,6 +24,9 @@ import { ZOOM_RANGE, fullMapView, type MapViewState } from './core/mapView.js';
  * サーバーが持つのは上流への取得間隔とログレベルだけで、
  * 利用地・表示・鳴らし方はすべてここ (その端末のブラウザ) が持つ。
  * 「予報まで通知するか / 警報だけか」の切り替えも端末側 (§3)。
+ *
+ * 「表示 = 情報 (全国分を常に出す) / 音・明滅 = 通知 (自分に関わるものだけ、既定)」
+ * の 2 層に分けている。音・明滅をどこまで絞るかも端末ごとの設定 (下記 eewScope 等)。
  */
 export interface Settings {
   /** 予報 (警報未満) でも音と明滅を出すか */
@@ -50,6 +56,21 @@ export interface Settings {
   flashSeconds: number;
   /** 地震情報の絞り込み */
   quakeFilter: QuakeFilter;
+  /**
+   * 音・明滅を出す速報の範囲。
+   * 'home' = 利用地に関わるもののみ (既定) / 'national' = 全国すべて (従来挙動)。
+   * パネル・地図の表示はこの設定に関係なく常に全国分を出す。
+   */
+  eewScope: 'home' | 'national';
+  /**
+   * 「関わる」とみなす震央距離 (km)。
+   * 警報対象地域の情報が無い予報 (震源不明を含む) の判定に使う。
+   */
+  eewRadiusKm: number;
+  /** 津波で音・明滅を出す下限グレード */
+  tsunamiAlertMin: TsunamiAlertMin;
+  /** 利用地の予報区が対象外でも、大津波警報なら知らせるか */
+  tsunamiNationalMajor: boolean;
 }
 
 /** URL で上書きできる設定。ここに無いものは端末の設定が常に勝つ。 */
@@ -72,6 +93,10 @@ export const DEFAULT_SETTINGS: Settings = {
   soundSeconds: DEFAULT_SOUND_SECONDS,
   flashSeconds: DEFAULT_FLASH_SECONDS,
   quakeFilter: { ...DEFAULT_QUAKE_FILTER },
+  eewScope: 'home',
+  eewRadiusKm: 300,
+  tsunamiAlertMin: 'watch',
+  tsunamiNationalMajor: true,
 };
 
 /**
@@ -149,6 +174,10 @@ function readStored(storage: Storage | null): Settings {
       soundSeconds: clampSoundSeconds(parsed.soundSeconds ?? DEFAULT_SETTINGS.soundSeconds),
       flashSeconds: clampFlashSeconds(parsed.flashSeconds ?? DEFAULT_SETTINGS.flashSeconds),
       quakeFilter: readFilter(parsed.quakeFilter),
+      eewScope: parsed.eewScope === 'national' ? 'national' : 'home',
+      eewRadiusKm: readEewRadiusKm(parsed.eewRadiusKm),
+      tsunamiAlertMin: readTsunamiAlertMin(parsed.tsunamiAlertMin),
+      tsunamiNationalMajor: parsed.tsunamiNationalMajor !== false,
     };
   } catch {
     // 壊れた値が入っていても起動を止めない
@@ -207,6 +236,16 @@ function readHome(value: Partial<HomeLocation> | undefined): HomeLocation | null
   if (typeof lat !== 'number' || typeof lon !== 'number') return null;
   if (!isLat(lat) || !isLon(lon)) return null;
   return { lat, lon };
+}
+
+function readEewRadiusKm(value: number | undefined): number {
+  const found = EEW_RADIUS_CHOICES.find((choice) => choice.value === value);
+  return found ? found.value : DEFAULT_SETTINGS.eewRadiusKm;
+}
+
+function readTsunamiAlertMin(value: TsunamiAlertMin | undefined): TsunamiAlertMin {
+  const found = TSUNAMI_ALERT_MIN_CHOICES.find((choice) => choice.value === value);
+  return found ? found.value : DEFAULT_SETTINGS.tsunamiAlertMin;
 }
 
 function readFilter(value: Partial<QuakeFilter> | undefined): QuakeFilter {

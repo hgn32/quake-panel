@@ -1,8 +1,10 @@
 import {
+  EEW_RADIUS_CHOICES,
   KMONI_LAYERS,
   KMONI_LAYER_LABELS,
   KMONI_LAYER_NOTES,
   MIN_INTENSITY_CHOICES,
+  TSUNAMI_ALERT_MIN_CHOICES,
   geolocationErrorMessage,
   type HomeLocation,
   type KmoniLayer,
@@ -96,8 +98,11 @@ export class SettingsPanel {
    * 章立てで組む。
    *
    * 項目が増えて一列に並べると、何を触っているのか分からなくなる。
-   * 「利用地」「リアルタイム表示」「地震速報」「地震速報の通知」「津波予報」の
-   * 5 つに分け、各章の中は「ラベル + 説明」と「操作部」の 2 列で揃える。
+   * 「利用地」「リアルタイム表示」「地震速報」「津波予報」「履歴パネル」「音と明滅」の
+   * 6 つに分け、各章の中は「ラベル + 説明」と「操作部」の 2 列で揃える。
+   *
+   * 表示 (パネル・地図) は常に全国分を出す。音・明滅だけを利用地との関わりで絞る、
+   * という設計を「地震速報」「津波予報」の章の説明文に反映してある。
    */
   private render(): void {
     const settings = this.deps.getSettings();
@@ -105,7 +110,7 @@ export class SettingsPanel {
       this.deps.form,
       this.section(
         '利用地',
-        '地図の中心と、津波予報区の自動判定に使います。',
+        '地図の初期位置と、地震速報・津波・履歴の「自分に関わるか」の判定に使います。',
         this.homeRow(settings),
       ),
       this.section(
@@ -121,23 +126,69 @@ export class SettingsPanel {
       ),
       this.section(
         '地震速報',
-        'サーバーは常に予報も警報も受信しています。',
+        'サーバーは常に全国の予報・警報を受信し、パネルと地図には全国分を表示します。音と明滅だけをここで絞れます。',
         this.radioRow(
-          'EEW の通知範囲',
+          '音・明滅を出す速報',
+          '警報は、警報対象地域に利用地の県が入っているかで判定します。',
+          [
+            { value: 'home', label: '利用地に関わるもののみ', checked: settings.eewScope === 'home' },
+            { value: 'national', label: '全国すべて', checked: settings.eewScope === 'national' },
+          ],
+          (value) => {
+            this.deps.onChange({ eewScope: value === 'national' ? 'national' : 'home' });
+            // 速報の範囲によって震央距離の行の disabled が変わるため引き直す
+            this.render();
+          },
+        ),
+        this.selectRow(
+          '「関わる」とみなす震央距離',
+          '対象地域の情報が無い予報は、震央からの距離で判定します。距離は判定にだけ使い、揺れや到達時刻の予測はしません。',
+          settings.eewRadiusKm,
+          EEW_RADIUS_CHOICES,
+          (value) => this.deps.onChange({ eewRadiusKm: value }),
+          settings.eewScope === 'national',
+        ),
+        this.radioRow(
+          '音・明滅を出す下限',
           '気象庁の基準で、震度5弱以上の強い揺れが予想される地域がある場合は「警報」、それに満たない場合は「予報」として発表されます。',
           [
-            { value: 'all', label: '予報から通知', checked: settings.notifyForecast },
-            { value: 'warning', label: '警報のみ通知', checked: !settings.notifyForecast },
+            { value: 'all', label: '予報から出す', checked: settings.notifyForecast },
+            { value: 'warning', label: '警報のみ', checked: !settings.notifyForecast },
           ],
           (value) => this.deps.onChange({ notifyForecast: value === 'all' }),
         ),
+      ),
+      this.section(
+        '津波予報',
+        '発表は常にパネルと地図に表示します。音と明滅は、自分の予報区が対象のときだけ出します。',
+        this.tsunamiRow(settings),
+        this.selectRow(
+          '音・明滅を出す下限',
+          '高さの予想で4段階あります: 大津波警報(3m超)／津波警報(1m超3m以下)／' +
+            '津波注意報(20cm以上1m以下)／津波予報(20cm未満)。',
+          settings.tsunamiAlertMin,
+          TSUNAMI_ALERT_MIN_CHOICES,
+          (value) => this.deps.onChange({ tsunamiAlertMin: value }),
+        ),
+        this.checkboxRow(
+          '利用地以外だけの大津波警報も知らせる',
+          '自分の予報区が対象外でも、どこかに大津波警報が出ていれば音と明滅を出します。' +
+            '「出さない」を選んでいるときは効きません。',
+          settings.tsunamiNationalMajor,
+          (checked) => this.deps.onChange({ tsunamiNationalMajor: checked }),
+        ),
+      ),
+      this.section(
+        '履歴パネル',
+        '気象庁発表の事後の地震情報です。表示を絞るだけで、音・明滅は出しません。',
         this.quakeFilterRow(settings),
         this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
           this.deps.onChange({ historyCount: value }),
         ),
       ),
+      // EEW 専用ではなく津波の音・明滅にも共通する章なので「音と明滅」という章名にする
       this.section(
-        '地震速報の通知',
+        '音と明滅',
         null,
         this.sliderRow(
           '音量',
@@ -182,11 +233,6 @@ export class SettingsPanel {
           }),
         ),
       ),
-      this.section(
-        '津波予報',
-        '強調表示する津波予報区を選びます。',
-        this.tsunamiRow(settings),
-      ),
     );
   }
 
@@ -220,6 +266,32 @@ export class SettingsPanel {
       select.append(option);
     });
     select.addEventListener('change', () => onSelect(Number(select.value)));
+    return this.row(label, hint, select);
+  }
+
+  /**
+   * 値の選択 (select)。数値・文字列いずれの選択肢にも使えるようにしてある
+   * (震央距離は数値、津波の下限グレードは文字列)。
+   */
+  private selectRow<T extends string | number>(
+    label: string,
+    hint: string | null,
+    value: T,
+    choices: ReadonlyArray<{ value: T; label: string }>,
+    onSelect: (value: T) => void,
+    disabled = false,
+  ): HTMLElement {
+    const select = h('select', { class: 'settings__select' });
+    choices.forEach((choice) => {
+      const option = h('option', { value: String(choice.value), text: choice.label });
+      option.selected = choice.value === value;
+      select.append(option);
+    });
+    select.disabled = disabled;
+    select.addEventListener('change', () => {
+      const found = choices.find((choice) => String(choice.value) === select.value);
+      if (found) onSelect(found.value);
+    });
     return this.row(label, hint, select);
   }
 
@@ -364,7 +436,7 @@ export class SettingsPanel {
           class: 'settings__hint',
           text: fixed
             ? 'URL で指定されているため変更できません。'
-            : '地図の中心と、地震情報の履歴で自分の県を前に出すのに使います。',
+            : '地図の中心と、速報・津波・履歴の判定に使います。',
         }),
         status,
       ),
@@ -436,12 +508,6 @@ export class SettingsPanel {
       select.append(option);
     });
     select.disabled = auto || fixed;
-    const levelsHint = h('span', {
-      class: 'settings__hint',
-      text:
-        '津波の高さの予想により4段階あります: 大津波警報(3mを超える)／津波警報(1mを超え3m以下)／' +
-        '津波注意報(20cm以上1m以下)／津波予報(20cm未満)。',
-    });
     const hint = h('span', { class: 'settings__hint' });
     const renderHint = (): void => {
       hint.textContent = fixed
@@ -479,8 +545,7 @@ export class SettingsPanel {
       h(
         'div',
         { class: 'settings__label' },
-        h('span', { text: '強調する津波予報区' }),
-        levelsHint,
+        h('span', { text: '自分の予報区' }),
         hint,
       ),
       h('div', { class: 'settings__stack' }, mode, select),
