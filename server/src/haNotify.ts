@@ -2,6 +2,7 @@ import {
   intensityLabel,
   shouldNotifyEew,
   shouldNotifyQuake,
+  shouldNotifyTsunami,
   type EewState,
   type HaNotifyFilter,
   type JsonValue,
@@ -96,6 +97,17 @@ export class HomeAssistantNotifier {
     return next !== null && this.eew !== null && this.eew.id === next.id;
   }
 
+  /**
+   * 絞り込みで落とす津波予報か。
+   *
+   * 緊急地震速報と同じで、一度 HA へ流した予報の続報は、対象区が減って
+   * 条件を外れても流し続ける。解除を伝えられなくなるため。
+   */
+  private acceptTsunami(next: TsunamiInfo | null): boolean {
+    if (shouldNotifyTsunami(next, this.filter)) return true;
+    return next !== null && this.tsunami !== null && this.tsunami.id === next.id;
+  }
+
   private handle(event: ServerEvent): void {
     switch (event.type) {
       case 'eew': {
@@ -110,6 +122,7 @@ export class HomeAssistantNotifier {
         break;
       }
       case 'tsunami': {
+        if (!this.acceptTsunami(event.tsunami)) break;
         this.tsunami = event.tsunami;
         const key = event.tsunami ? `${event.tsunami.id}:${event.tsunami.cancelled}` : 'none';
         if (key !== this.lastEventKey.tsunami) {

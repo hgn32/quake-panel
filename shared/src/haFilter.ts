@@ -1,5 +1,6 @@
 import { parseIntensityText } from './intensity.js';
-import type { EewState, QuakeInfo } from './models.js';
+import type { EewState, QuakeInfo, TsunamiInfo } from './models.js';
+import { applyHomeAreas, tsunamiAreasForPrefecture } from './tsunami.js';
 
 /**
  * Home Assistant へ流す通知の絞り込み。
@@ -57,6 +58,32 @@ export function shouldNotifyEew(eew: EewState | null, filter: HaNotifyFilter): b
   // 予想震度の地域が来ていない第一報は、地域では落とさない (震度の条件だけ見る)
   if (eew.regions.length === 0) return true;
   return eew.regions.some((region) => matchesArea(region.name, filter.prefectures));
+}
+
+/**
+ * 津波予報を HA へ流すか。
+ *
+ * 判定は**画面と同じ仕様**にする (`applyHomeAreas` の `affectsHome`)。
+ * 県名だけの部分一致では「東北地方太平洋沿岸」のような広域の区や
+ * 「有明・八代海」のような湾の区を取りこぼすため、
+ * 県から予報区を引き直してから判定する。
+ *
+ * 震度のしきい値は見ない。津波に震度は無く、遠地地震で震度が小さくても
+ * 津波は来るため (2010年チリ地震など)。
+ *
+ * 解除と対象地域なしは、絞り込みに関わらず必ず流す。
+ * 緊急地震速報の取消と同じで、ここで黙ると自動化を戻せなくなる。
+ */
+export function shouldNotifyTsunami(
+  tsunami: TsunamiInfo | null,
+  filter: HaNotifyFilter,
+): boolean {
+  if (!tsunami) return true;
+  if (tsunami.cancelled) return true;
+  if (tsunami.areas.length === 0) return true;
+  if (filter.prefectures.length === 0) return true;
+  const homeAreas = filter.prefectures.flatMap((pref) => tsunamiAreasForPrefecture(pref));
+  return applyHomeAreas(tsunami, homeAreas).affectsHome;
 }
 
 /** 予報区名・地域名は県名と一致しないことがあるので、部分一致でも拾う */
