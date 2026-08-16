@@ -21,24 +21,60 @@ export interface HaNotifyFilter {
    * 地震情報は観測点の県、緊急地震速報は予想震度が出ている地域名で見る。
    */
   prefectures: readonly string[];
+  /**
+   * 通知する細分区域 (気象庁の「地域」。例: 宮崎県南部平野部)。空なら見ない。
+   *
+   * 都道府県と併用したときは**どちらかに当たれば通知**する (AND ではない)。
+   * 「県全体は震度4以上、自分の区域だけは震度2以上」のような使い分けはできず、
+   * それをやりたくなったら設定を分ける必要がある。
+   *
+   * 津波予報には効かない。津波は細分区域ではなく津波予報区で発表されるため
+   * (語彙が別物)。津波は都道府県だけで絞る。
+   */
+  areas: readonly string[];
 }
 
 export const DEFAULT_HA_NOTIFY_FILTER: HaNotifyFilter = {
   minIntensity: 0,
   prefectures: [],
+  areas: [],
 };
 
-/** 地震情報 (P2P 551) を HA へ流すか */
-export function shouldNotifyQuake(quake: QuakeInfo, filter: HaNotifyFilter): boolean {
+/**
+ * 観測点から細分区域を引く関数。
+ *
+ * 対応表は 4000 件を超えるので画面では持たず、サーバー側から渡す
+ * (`server/src/data/seismicAreas.ts`)。渡さなければ細分区域では絞らない。
+ */
+export type SeismicAreaResolver = (addr: string, isArea: boolean) => string | null;
+
+/**
+ * 地震情報 (P2P 551) を HA へ流すか。
+ *
+ * 場所の条件は都道府県と細分区域の**どちらかに当たれば通す**。
+ * 震度が入っていない観測点 (無感) は「そこは揺れていない」ものとして数えない。
+ */
+export function shouldNotifyQuake(
+  quake: QuakeInfo,
+  filter: HaNotifyFilter,
+  areaOf?: SeismicAreaResolver,
+): boolean {
   if (filter.minIntensity > 0) {
     // 震度の分からない電文 (震源に関する情報など) は「揺れの情報が無い」ものとして落とす
     if (quake.maxIntensity === null) return false;
     if (quake.maxIntensity < filter.minIntensity) return false;
   }
-  if (filter.prefectures.length === 0) return true;
-  return quake.points.some(
-    (point) => point.scale !== null && matchesArea(point.pref, filter.prefectures),
-  );
+  if (filter.prefectures.length === 0 && filter.areas.length === 0) return true;
+  const shaken = quake.points.filter((point) => point.scale !== null);
+  const byPref =
+    filter.prefectures.length > 0 &&
+    shaken.some((point) => matchesArea(point.pref, filter.prefectures));
+  if (byPref) return true;
+  if (filter.areas.length === 0 || !areaOf) return false;
+  return shaken.some((point) => {
+    const area = areaOf(point.addr, point.isArea);
+    return area !== null && filter.areas.includes(area);
+  });
 }
 
 /**
@@ -54,10 +90,15 @@ export function shouldNotifyEew(eew: EewState | null, filter: HaNotifyFilter): b
     if (eew.maxIntensity === null) return false;
     if (eew.maxIntensity < filter.minIntensity) return false;
   }
-  if (filter.prefectures.length === 0) return true;
+  if (filter.prefectures.length === 0 && filter.areas.length === 0) return true;
   // 予想震度の地域が来ていない第一報は、地域では落とさない (震度の条件だけ見る)
   if (eew.regions.length === 0) return true;
-  return eew.regions.some((region) => matchesArea(region.name, filter.prefectures));
+  // 緊急地震速報の地域名は細分区域そのもの (実測で気象庁のコード表と一致) なので、
+  // 細分区域は表記ゆれを考えず完全一致で見る。都道府県は部分一致のまま。
+  return eew.regions.some(
+    (region) =>
+      filter.areas.includes(region.name) || matchesArea(region.name, filter.prefectures),
+  );
 }
 
 /**

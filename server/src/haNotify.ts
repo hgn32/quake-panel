@@ -11,6 +11,7 @@ import {
   type TsunamiInfo,
 } from '@quake-panel/shared';
 import type { Config } from './config.js';
+import { seismicAreaOf } from './data/seismicAreas.js';
 import type { Hub } from './hub.js';
 import { createLogger, describeError } from './logger.js';
 
@@ -133,7 +134,7 @@ export class HomeAssistantNotifier {
         break;
       }
       case 'quake': {
-        if (!shouldNotifyQuake(event.quake, this.filter)) break;
+        if (!shouldNotifyQuake(event.quake, this.filter, seismicAreaOf)) break;
         this.quake = event.quake;
         if (event.quake.id !== this.lastEventKey.quake) {
           this.lastEventKey.quake = event.quake.id;
@@ -228,7 +229,8 @@ export function describeFilter(filter: HaNotifyFilter): string {
     filter.minIntensity > 0
       ? `震度${intensityLabel(filter.minIntensity) ?? filter.minIntensity}以上`
       : '震度の条件なし';
-  const area = filter.prefectures.length > 0 ? filter.prefectures.join('・') : '全国';
+  const places = [...filter.prefectures, ...filter.areas];
+  const area = places.length > 0 ? places.join('・') : '全国';
   return `通知条件: ${intensity} / ${area}`;
 }
 

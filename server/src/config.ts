@@ -130,6 +130,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         minIntensity:
           parseMinIntensity(env['HA_NOTIFY_MIN_INTENSITY']) ?? DEFAULT_HA_NOTIFY_FILTER.minIntensity,
         prefectures: parsePrefectureList(str(env['HA_NOTIFY_PREFECTURES'], '')),
+        areas: parsePrefectureList(str(env['HA_NOTIFY_AREAS'], '')),
       },
       refreshMs: num(env['HA_STATE_REFRESH_MS'], 60_000),
       timeoutMs: num(env['HA_REQUEST_TIMEOUT_MS'], 4000),
