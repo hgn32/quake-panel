@@ -1,21 +1,12 @@
-import {
-  ENDPOINTS,
-  GEOLOCATION_ERROR,
-  parseHomeLocation,
-  type HomeLocation,
-  type JsonValue,
-} from '@quake-panel/shared';
-import { resolveUrl } from './urls.js';
+import { GEOLOCATION_ERROR, type HomeLocation } from '@quake-panel/shared';
 
 /**
- * 利用地を自動で決めるための 2 つの取得元。
+ * 利用地を自動で決めるための取得元。
  *
- * - ブラウザの位置情報 (その端末の現在地)。**セキュアコンテキスト (HTTPS または
- *   localhost) でしか API が存在しない**ので、素の HTTP で開くキオスク端末では使えない。
- * - Home Assistant に設定されている自宅の位置。HTTP でも使えるが、
- *   アドオンとして動かしているときだけ返る。
+ * ブラウザの位置情報 (その端末の現在地) を使う。**セキュアコンテキスト (HTTPS または
+ * localhost) でしか API が存在しない**ので、素の HTTP で開くキオスク端末では使えない。
  *
- * どちらも「取れたら設定へ入れる」だけで、保存の確定は利用者の操作に任せる。
+ * 「取れたら設定へ入れる」だけで、保存の確定は利用者の操作に任せる。
  */
 
 const GEOLOCATION_OPTIONS: PositionOptions = {
@@ -60,15 +51,4 @@ export function requestBrowserLocation(): Promise<HomeLocation> {
       GEOLOCATION_OPTIONS,
     );
   });
-}
-
-/** Home Assistant に設定されている自宅の位置。未設定・非アドオン運用なら null。 */
-export function fetchHomeAssistantLocation(): Promise<HomeLocation | null> {
-  return fetch(resolveUrl(ENDPOINTS.homeLocation), { headers: { accept: 'application/json' } }).then(
-    (res) => {
-      if (res.status === 204) return null;
-      if (!res.ok) return Promise.reject(new Error(`HTTP ${res.status}`));
-      return res.json().then((body: JsonValue) => parseHomeLocation(body));
-    },
-  );
 }

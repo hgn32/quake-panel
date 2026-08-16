@@ -1,13 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { resolve } from 'node:path';
 import { ENDPOINTS, parseKmoniLayer } from '@quake-panel/shared';
 import type { Config } from '../config.js';
-import { fetchHomeLocation } from '../haLocation.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
 import type { FrameLayer, KmoniFrameWorker } from '../sources/kmoniFrames.js';
-import { ingressBaseHref, serveIndexHtml } from './indexHtml.js';
-import { serveStatic } from './static.js';
+import { resolveStaticRoot, serveStatic } from './static.js';
 
 const log = createLogger('http');
 
@@ -31,7 +28,9 @@ export function createHttpServer(
   hub: Hub,
   frames: KmoniFrameWorker,
 ): Server {
-  const staticRoot = resolve(config.staticDir);
+  // `config.staticDir` はリポジトリルートからの相対パス。cwd (dev/prod で異なる)
+  // に左右されないよう、このモジュール自身の位置を起点に解決する (static.ts 参照)。
+  const staticRoot = resolveStaticRoot(import.meta.url, config.staticDir);
 
   return createServer((req, res) => {
     handle(req, res).catch((error) => {
@@ -60,19 +59,6 @@ export function createHttpServer(
     if (path === '/api/state') {
       sendJson(res, 200, hub.getSnapshot());
       return Promise.resolve();
-    }
-
-    // 利用地を設定するときの補助。HA に自宅の位置が入っていればそれを返す。
-    // 素の HTTP ではブラウザの位置情報 API が使えないため、キオスク端末では
-    // これが唯一の自動取得手段になる。
-    if (path === ENDPOINTS.homeLocation) {
-      return fetchHomeLocation(config).then((home) => {
-        if (!home) {
-          res.writeHead(204, { 'cache-control': 'no-store' }).end();
-          return Promise.resolve();
-        }
-        sendJson(res, 200, home);
-      });
     }
 
     // 直接アクセス用。サーバーが既定で取っている指標の最新画像を返す。
@@ -109,16 +95,13 @@ export function createHttpServer(
       }
     }
 
-    // index.html だけは静的配信を通さない。前置きパス付きで公開されている
-    // 場合に `<base>` を差し込む必要がある (indexHtml.ts)。
-    const isIndex = path === '/' || path === '/index.html';
     const isAppPath = !path.startsWith('/api/') && !path.startsWith('/kmoni/');
-    return (isIndex ? Promise.resolve(false) : serveStatic(staticRoot, path, res))
+    return serveStatic(staticRoot, path, res)
       .then((served) => {
         if (served) return true;
         // SPA ではないが、キオスクの URL 直打ちに備えて index.html へ寄せる
-        if (!isIndex && !isAppPath) return false;
-        return serveIndexHtml(staticRoot, ingressBaseHref(req), res);
+        if (!isAppPath) return false;
+        return serveStatic(staticRoot, '/index.html', res);
       })
       .then((served) => {
         if (!served) {

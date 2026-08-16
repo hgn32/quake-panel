@@ -11,7 +11,7 @@ describe('利用地の読み取り', () => {
     });
   });
 
-  it('latitude / longitude を読む (Home Assistant のコア API 形式)', () => {
+  it('latitude / longitude を読む (外部 API 形式)', () => {
     // HA の /config は他のキーも大量に返す。必要なものだけ拾えること。
     const config = {
       latitude: 43.062,

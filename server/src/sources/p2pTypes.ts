@@ -75,8 +75,6 @@ export interface P2PEew extends P2PBase {
   }>;
 }
 
-export type P2PMessage = P2PQuake | P2PTsunami | P2PEewDetection | P2PEew | P2PBase;
-
 export const P2P_CODES = {
   quake: 551,
   tsunami: 552,

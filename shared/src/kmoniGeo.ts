@@ -29,9 +29,6 @@ export const KMONI_MAP = {
   pxPerDegLat: 24.5262,
 } as const;
 
-export const KMONI_MAP_EAST = KMONI_MAP.west + KMONI_MAP.width / KMONI_MAP.pxPerDegLon;
-export const KMONI_MAP_SOUTH = KMONI_MAP.north - KMONI_MAP.height / KMONI_MAP.pxPerDegLat;
-
 /**
  * 南西諸島インセットの配置。
  * 縮尺は本土と同じで、平行移動だけで一致する (較正で scale=0.997、実質 1.0)。
@@ -94,12 +91,6 @@ export function unprojectFromPixel(
     return pixelToLatLon(x - KMONI_INSET.offsetX, y - KMONI_INSET.offsetY);
   }
   return pixelToLatLon(x, y);
-}
-
-/** 配信画像の描画範囲に収まるか */
-export function isInsideMap(lat: number, lon: number): boolean {
-  const p = latLonToPixel(lat, lon);
-  return p.x >= 0 && p.x <= KMONI_MAP.width && p.y >= 0 && p.y <= KMONI_MAP.height;
 }
 
 /**

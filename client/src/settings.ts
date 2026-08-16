@@ -1,6 +1,7 @@
 import {
   DEFAULT_FLASH_SECONDS,
   type HomeLocation,
+  DEFAULT_KMONI_LAYER,
   DEFAULT_SOUND_SECONDS,
   DEFAULT_QUAKE_FILTER,
   DEFAULT_SIDE_WIDTH,
@@ -25,8 +26,6 @@ export interface Settings {
   /** 予報 (警報未満) でも音と明滅を出すか */
   notifyForecast: boolean;
   volume: number;
-  /** 観測点の発光表現 (重い端末では切る) */
-  glow: boolean;
   /** 履歴に表示する件数 */
   historyCount: number;
   /** 利用地。地図の中心と、履歴で自分の県を前に出すのに使う */
@@ -43,8 +42,8 @@ export interface Settings {
   sideHeight: number;
   /** 操作で地図を動かさない (キオスク運用向け) */
   locked: boolean;
-  /** 表示する強震モニタの指標。null はサーバーの既定に従う */
-  layer: KmoniLayer | null;
+  /** 表示する強震モニタの指標 */
+  layer: KmoniLayer;
   /** 音を鳴らす上限 (秒)。0 ならパターンどおり鳴らし切る */
   soundSeconds: number;
   /** 明滅を続ける上限 (秒)。0 なら止めない */
@@ -61,7 +60,6 @@ const STORAGE_KEY = 'quake-panel.settings.v1';
 export const DEFAULT_SETTINGS: Settings = {
   notifyForecast: true,
   volume: 0.7,
-  glow: true,
   historyCount: 6,
   home: { lat: HOME_LOCATION.lat, lon: HOME_LOCATION.lon },
   tsunamiMode: 'auto',
@@ -70,7 +68,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sideWidth: DEFAULT_SIDE_WIDTH,
   sideHeight: 0,
   locked: false,
-  layer: null,
+  layer: DEFAULT_KMONI_LAYER,
   soundSeconds: DEFAULT_SOUND_SECONDS,
   flashSeconds: DEFAULT_FLASH_SECONDS,
   quakeFilter: { ...DEFAULT_QUAKE_FILTER },
@@ -138,7 +136,6 @@ function readStored(storage: Storage | null): Settings {
     return {
       notifyForecast: parsed.notifyForecast ?? DEFAULT_SETTINGS.notifyForecast,
       volume: clamp(parsed.volume ?? DEFAULT_SETTINGS.volume, 0, 1),
-      glow: parsed.glow ?? DEFAULT_SETTINGS.glow,
       historyCount: clamp(parsed.historyCount ?? DEFAULT_SETTINGS.historyCount, 3, 12),
       home: readHome(parsed.home) ?? { ...DEFAULT_SETTINGS.home },
       tsunamiMode: parsed.tsunamiMode === 'manual' ? 'manual' : 'auto',
@@ -148,7 +145,7 @@ function readStored(storage: Storage | null): Settings {
       sideWidth: readSize(parsed.sideWidth, DEFAULT_SETTINGS.sideWidth),
       sideHeight: readSize(parsed.sideHeight, DEFAULT_SETTINGS.sideHeight),
       locked: parsed.locked ?? DEFAULT_SETTINGS.locked,
-      layer: parseKmoniLayer(parsed.layer),
+      layer: parseKmoniLayer(parsed.layer) ?? DEFAULT_SETTINGS.layer,
       soundSeconds: clampSoundSeconds(parsed.soundSeconds ?? DEFAULT_SETTINGS.soundSeconds),
       flashSeconds: clampFlashSeconds(parsed.flashSeconds ?? DEFAULT_SETTINGS.flashSeconds),
       quakeFilter: readFilter(parsed.quakeFilter),

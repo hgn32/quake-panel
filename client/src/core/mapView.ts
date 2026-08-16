@@ -36,8 +36,6 @@ export function liftPointColor(r: number, g: number, b: number): [number, number
 export const ZOOM_RANGE = { min: 1, max: 8 } as const;
 
 export interface MapViewOptions {
-  /** 観測点の発光表現。Pi4 で重い場合に切れるようにしておく。 */
-  glow: boolean;
   /** 表示位置。ホイールとドラッグで動く */
   view: MapViewState;
   /** false ならホイールもドラッグも受け付けない (キオスク運用) */
@@ -673,24 +671,6 @@ export class MapView {
         // 画面の外は描かない (拡大時はほとんどが外になる)
         if (sx + size < 0 || sy + size < 0 || sx > width || sy > height) continue;
         ctx.fillRect(sx, sy, size, size);
-      }
-    }
-    if (this.options.glow) {
-      // 少し大きい四角を薄く重ねて発光させる。にじませるより軽い。
-      // 日本全体を写しているときは観測点が密で、強くすると重なって白く潰れる。
-      // 拡大して疎になるほど強くする。
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = Math.min(0.3, 0.02 * scale);
-      const glowSize = size + 4;
-      const glowHalf = glowSize / 2;
-      for (const [color, coords] of points) {
-        ctx.fillStyle = color;
-        for (let i = 0; i < coords.length; i += 2) {
-          const sx = Math.round((coords[i] ?? 0) * scale + offsetX - glowHalf);
-          const sy = Math.round((coords[i + 1] ?? 0) * scale + offsetY - glowHalf);
-          if (sx + glowSize < 0 || sy + glowSize < 0 || sx > width || sy > height) continue;
-          ctx.fillRect(sx, sy, glowSize, glowSize);
-        }
       }
     }
     ctx.restore();

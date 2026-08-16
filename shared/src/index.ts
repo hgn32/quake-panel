@@ -1,5 +1,4 @@
 export * from './alertLimits.js';
-export * from './haFilter.js';
 export * from './homeLocation.js';
 export * from './kmoniLayer.js';
 export * from './quakeFilter.js';

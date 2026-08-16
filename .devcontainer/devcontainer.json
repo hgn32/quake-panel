@@ -18,14 +18,16 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "remote.autoForwardPorts": false
+        "remote.autoForwardPorts": false,
+        // 統合ターミナル内では Ctrl+B をシェル（tmux のプレフィックスキー）に渡す
+        "terminal.integrated.commandsToSkipShell": [
+          "-workbench.action.toggleSidebarVisibility"
+        ]
       },
       "extensions": [
         "MS-CEINTL.vscode-language-pack-ja",
-        "Prisma.prisma",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "lokalise.i18n-ally",
         "ms-azuretools.vscode-docker",
         "ms-vsliveshare.vsliveshare",
         "redhat.vscode-yaml",

@@ -76,7 +76,7 @@ export class P2PClient {
     if (this.stopped) return;
     log.info(`connecting to ${this.config.p2p.wsUrl}`);
     // ws は環境変数を見ないので、プロキシ配下では agent を明示的に渡す。
-    const proxyAgent = createWsProxyAgent(this.config.p2p.wsUrl);
+    const proxyAgent = createWsProxyAgent();
     const socket = new WebSocket(this.config.p2p.wsUrl, {
       handshakeTimeout: 10_000,
       headers: { 'user-agent': 'quake-panel/0.1 (private household display)' },

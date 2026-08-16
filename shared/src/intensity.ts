@@ -23,8 +23,6 @@ export type IntensityLevel =
   | 60 // 震度6強
   | 70; // 震度7
 
-export const INTENSITY_UNKNOWN = -1;
-
 const LABELS: ReadonlyArray<readonly [number, string]> = [
   [10, '1'],
   [20, '2'],

@@ -7,13 +7,7 @@ services:
     # リバースプロキシ (nginx) の後ろに置く前提。直接公開しない (§2)。
     ports:
       - '127.0.0.1:8080:8080'
-    environment:
-      TZ: Asia/Tokyo
-      LOG_LEVEL: info
-      # 利用地・津波予報区・表示は端末ごとにパネルの「設定」で決める
-      # 実測で kmoni は毎秒更新。負荷を抑えたい場合は 2000 にする。
-      KMONI_IDLE_FRAME_INTERVAL_SEC: '1'
-      KMONI_ACTIVE_FRAME_INTERVAL_SEC: '1'
+    # 設定はすべて既定で動く。変えたいときだけ environment に足す (README の表)。
     # 画像はメモリ上のリングバッファに置くだけなので、上限を切っておく
     mem_limit: 512m
     logging:

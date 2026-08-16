@@ -6,8 +6,8 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc -b",
-    "dev": "tsc -b ../shared && tsx watch --clear-screen=false src/index.ts",
-    "start": "node dist/index.js"
+    "dev": "tsc -b ../shared && tsx watch --env-file-if-exists=../.env --clear-screen=false src/index.ts",
+    "start": "node --env-file-if-exists=../.env dist/index.js"
   },
   "dependencies": {
     "@quake-panel/shared": "*",

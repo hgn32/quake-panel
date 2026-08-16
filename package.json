@@ -17,7 +17,7 @@
     "typecheck": "tsc -b shared server client --pretty",
     "dev": "npm run dev -w @quake-panel/server",
     "dev:client": "npm run dev -w @quake-panel/client",
-    "start": "node server/dist/index.js",
+    "start": "node --env-file-if-exists=.env server/dist/index.js",
     "test": "npm run build && node --test \"shared/test/*.test.mjs\" \"server/test/*.test.mjs\"",
     "clean": "rm -rf shared/dist server/dist client/dist shared/*.tsbuildinfo server/*.tsbuildinfo client/*.tsbuildinfo"
   },

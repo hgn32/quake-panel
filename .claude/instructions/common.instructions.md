@@ -2,25 +2,6 @@
 
 ## 0. 禁止事項（絶対厳守 / 最優先）
 
-### 0-1. コンテナ外のDBへのアクセス禁止
-
-**devcontainer 内の DB 以外には、いかなる理由があっても絶対にアクセスしてはならない。**
-
-- 接続を許可する唯一の DB ホスト: **`db`（`.devcontainer/docker-compose.yml` の `db` サービス / ポート 5432）**
-  - `localhost` / `127.0.0.1` はコンテナ内のためフック上は許可しているが、実際の DB は `db` にある。
-- **それ以外のDBへの接続は絶対禁止。** 参照（SELECT）も禁止。本番かどうかは無関係で、コンテナ外なら一律禁止。
-- **接続先ホストは必ず `-h` で明示すること。** ホスト無指定、`PGHOST` / `DATABASE_URL` / `.env` 読み込み経由など、
-  接続先が静的に確認できないコマンドも禁止（コンテナ外へ繋がり得るため）。
-- 禁止対象コマンド例: `psql` / `pg_dump` / `pg_dumpall` / `pg_restore` / `pg_isready` / `pgbench` / `createdb` / `dropdb` /
-  `pg_basebackup` / `vacuumdb` / `reindexdb`、および `prisma migrate` / `prisma studio` / `prisma db push` / `db pull` / `db execute` / `db seed`
-  （`prisma generate` などDB接続しないものは対象外）
-- コンテナ外のデータを確認したい場合は、ユーザーに依頼すること。**自分で接続しようとしてはならない。**
-  ローカルで確認可能なダンプ（`sql/` 配下）があればそれを参照する。
-
-この禁止は `PreToolUse` フック（`.claude/hooks/deny-external-db.sh`、`.claude/settings.json` で登録）が
-**許可リスト方式**で機械的にブロックしている（コンテナ内ホストと確認できたものだけ通す＝フェイルクローズ）。
-**フックを迂回・無効化・書き換えて実行してはならない。**
-
 ## 1. 全体原則
 
 - 回答はすべて**日本語**で行ってください。

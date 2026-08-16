@@ -68,7 +68,7 @@ $ curl -s http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json
 
 平常時の取得間隔は **1 秒** を既定にした (§7-4 の宿題)。
 毎秒でも外部への負荷は 8 KB/s 程度で、サーバー集約なのでクライアント数に依存しない。
-落としたい場合は `KMONI_IDLE_FRAME_INTERVAL_MS=2000` で 2 秒に変えられる。
+落としたい場合は `KMONI_IDLE_FRAME_INTERVAL_SEC=2` で 2 秒に変えられる。
 
 ### 補助レイヤ (EEW 発表中のみ生成)
 

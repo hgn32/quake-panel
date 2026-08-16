@@ -61,8 +61,6 @@ export function isServerEvent(value: JsonValue): boolean {
 export const ENDPOINTS = {
   ws: '/ws',
   state: '/api/state',
-  /** Home Assistant に設定されている自宅の緯度経度 (未設定なら 204) */
-  homeLocation: '/api/home-location',
   health: '/healthz',
   /** 最新の観測画像 (サーバーの既定指標) */
   latestFrame: '/kmoni/latest.gif',

@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
 import { describe, it } from 'node:test';
 
 import { loadConfig } from '../dist/config.js';
-import { HomeAssistantNotifier } from '../dist/haNotify.js';
 import { Hub } from '../dist/hub.js';
 
 /**
- * Hub は同じイベントオブジェクトを全リスナー (WebSocket 配信 / HA 通知) へ渡す。
+ * Hub は同じイベントオブジェクトを全リスナー (WebSocket 配信 / その他の購読者) へ渡す。
  * どちらかが中身を書き換えると、もう片方が壊れた値を見る。
  *
  * ここでは配信前に**深く凍結**して publish する。ES モジュールは strict mode
@@ -73,41 +71,52 @@ const TSUNAMI = deepFreeze({
   receivedAt: '2026-08-16T01:00:00.000Z',
 });
 
-/** 偽の HA を立てて、実際に通知を走らせた状態で検証する */
-const withNotifier = (env, body) => {
-  const server = createServer((req, res) => {
-    req.resume();
-    req.on('end', () => {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end('{}');
-    });
+/**
+ * Hub の 2 つ目の購読者を模した、その場限りの最小リスナー。
+ *
+ * Hub は配信 (ws) 以外にも同じイベントを購読する購読者がいる構成を
+ * 想定しており、ここで検証したいのは「Hub が複数リスナーへ同じイベントを
+ * 配ってもどちらも壊れない・絞り込みは購読者ごとに独立している」ことだけなので、
+ * 本物の通知先を持たない疑似的な絞り込みリスナーで代替する。
+ */
+const attachFilteringListener = (hub, { minIntensity = 0, prefectures = [] } = {}) => {
+  const accepted = [];
+  hub.on('event', (event) => {
+    if (event.type === 'quake') {
+      if (event.quake.maxIntensity < minIntensity) return;
+      if (prefectures.length > 0 && !event.quake.points.some((p) => prefectures.includes(p.pref))) return;
+    }
+    if (event.type === 'tsunami' && prefectures.length > 0) {
+      // 疑似リスナー自身の判定に使うだけで、配信側の値には影響しない。
+      applyHomeAreasLike(event.tsunami, prefectures);
+    }
+    accepted.push(event);
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    .then(() => {
-      const config = loadConfig({
-        HA_API_URL: `http://127.0.0.1:${server.address().port}/api`,
-        SUPERVISOR_TOKEN: 'test-token',
-        ...env,
-      });
-      const hub = new Hub(config);
-      const notifier = new HomeAssistantNotifier(config, hub);
-      notifier.start();
-      const seen = [];
-      // WebSocket 配信と同じ立場のリスナー。実際の配信は JSON 化するので、
-      // 受け取った直後の姿を控えておいて後で突き合わせる。
-      hub.on('event', (event) => seen.push({ event, snapshot: JSON.stringify(event) }));
-      body(hub);
-      return new Promise((resolve) => setTimeout(resolve, 300)).then(() => {
-        notifier.stop();
-        server.close();
-        return seen;
-      });
-    });
+  return accepted;
 };
 
-describe('Hub のイベントは配信系と HA 通知で共有されても壊れない', () => {
-  it('絞り込みを通す設定でも、配信側が受け取った中身が変わらない', () =>
-    withNotifier({ HA_NOTIFY_MIN_INTENSITY: '震度2以上', HA_NOTIFY_PREFECTURES: '宮崎県' }, (hub) => {
+/** `applyHomeAreas` 相当の簡易ロジック (疑似リスナーの中でだけ使う)。元のオブジェクトは書き換えない。 */
+const applyHomeAreasLike = (tsunami, prefectures) => ({
+  ...tsunami,
+  affectsHome: tsunami.areas.some((area) => prefectures.some((pref) => area.name.includes(pref))),
+});
+
+/** WebSocket 配信と同じ立場のリスナーを立てた状態で publish する */
+const withListeners = (env, filterOptions, body) => {
+  const config = loadConfig(env);
+  const hub = new Hub(config);
+  attachFilteringListener(hub, filterOptions);
+  const seen = [];
+  // WebSocket 配信と同じ立場のリスナー。実際の配信は JSON 化するので、
+  // 受け取った直後の姿を控えておいて後で突き合わせる。
+  hub.on('event', (event) => seen.push({ event, snapshot: JSON.stringify(event) }));
+  body(hub);
+  return Promise.resolve(seen);
+};
+
+describe('Hub のイベントは複数のリスナーで共有されても壊れない', () => {
+  it('もう一方のリスナーが受け取る設定でも、配信側が受け取った中身が変わらない', () =>
+    withListeners({}, { minIntensity: 20, prefectures: ['宮崎県'] }, (hub) => {
       hub.publishQuake(QUAKE);
       hub.publishEew(EEW);
       hub.publishTsunami(TSUNAMI);
@@ -118,12 +127,12 @@ describe('Hub のイベントは配信系と HA 通知で共有されても壊�
       });
     }));
 
-  it('絞り込みで落とす設定でも、配信側へは元のまま届く (画面は絞られない)', () =>
-    withNotifier({ HA_NOTIFY_MIN_INTENSITY: '震度5弱以上', HA_NOTIFY_PREFECTURES: '北海道' }, (hub) => {
+  it('もう一方のリスナーが絞り込みで落とす設定でも、配信側へは元のまま届く (画面は絞られない)', () =>
+    withListeners({}, { minIntensity: 50, prefectures: ['北海道'] }, (hub) => {
       hub.publishQuake(QUAKE);
       hub.publishTsunami(TSUNAMI);
     }).then((seen) => {
-      assert.equal(seen.length, 2, 'HA で落としても配信は止まらない');
+      assert.equal(seen.length, 2, '他のリスナーが落としても配信は止まらない');
       const quake = seen.find((s) => s.event.type === 'quake');
       assert.equal(quake.event.quake.maxIntensity, 30);
       assert.equal(quake.event.quake.points.length, 2);
@@ -134,11 +143,11 @@ describe('Hub のイベントは配信系と HA 通知で共有されても壊�
       assert.equal(tsunami.event.tsunami.affectsHome, false);
     }));
 
-  it('津波の判定 (applyHomeAreas) が元のオブジェクトを書き換えない', () =>
-    withNotifier({ HA_NOTIFY_PREFECTURES: '宮城県' }, (hub) => {
+  it('もう一方のリスナーの判定処理 (applyHomeAreasLike 相当) が元のオブジェクトを書き換えない', () =>
+    withListeners({}, { prefectures: ['宮城県'] }, (hub) => {
       hub.publishTsunami(TSUNAMI);
     }).then((seen) => {
-      // 宮城県は東北地方太平洋沿岸に含まれるので HA 側では該当と判定される。
+      // 宮城県は東北地方太平洋沿岸に含まれるので、もう一方のリスナー側では該当と判定される。
       // それでも配信された値の isHome / affectsHome は false のまま。
       const tsunami = seen.find((s) => s.event.type === 'tsunami');
       assert.equal(tsunami.event.tsunami.areas[0].isHome, false);

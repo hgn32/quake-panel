@@ -1,13 +1,8 @@
 # current dirは".devcontainer/"
 
 ###proxy
-# プロキシはここ 1 箇所だけで定義し、ビルド時 (build.args) と実行時 (environment) の
-# 両方から参照する。ビルド引数は実行中のコンテナに残らず、環境変数はビルド時に存在しないので、
-# 効かせたいタイミングが 2 つあるだけで定義は 1 つ。
-# 値そのものは initializeCommand.sh が社内/自宅を判定して .env に書き込む。
-# HTTP_PROXY ではなく PROXY_URL という名前にしているのは、.env に無いときに
-# ホスト側のシェル環境変数を拾ってしまうのを避けるため。
-
+#実行元の環境にHTTP_PROXY、HTTPS_PROXY、NO_PROXY、CLAUDE_PROXYを設定しておくこと
+#プロキシ不要な場合は未設定でよい
 services:
   workspace:
     build:
@@ -16,31 +11,21 @@ services:
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
-        NO_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        CLAUDE_PROXY: ${CLAUDE_PROXY:-}
     environment:
-      # Claude Code だけ別プロキシ。postStartCommand.sh が settings.json に反映する。
+      # プロキシや証明書抑制関係
       PYTHONWARNINGS: ignore:Unverified HTTPS request
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       CLAUDE_PROXY: ${CLAUDE_PROXY:-}
-      ##App
-      TZ: Asia/Tokyo
-      LOG_LEVEL: info
-      # 利用地・津波予報区・表示は端末ごとにパネルの「設定」で決める
-      # 実測で kmoni は毎秒更新。負荷を抑えたい場合は 2000 にする。
-      KMONI_IDLE_FRAME_INTERVAL_SEC: "1"
-      KMONI_ACTIVE_FRAME_INTERVAL_SEC: "1"
-    # 画像はメモリ上のリングバッファに置くだけなので、上限を切っておく
     working_dir: /workspaces
     volumes:
       - ../:/workspaces:cached
       - /var/run/docker.sock:/var/run/docker.sock
-      - $HOME/.aws/:/home/node/.aws
-      - claude-config:/home/node/.claude
       - /usr/share/ca-certificates/:/usr/share/ca-certificates/
+      - $HOME/.aws/:/home/node/.aws
+      - $HOME/.claude:/home/node/.claude
+      - $HOME/.claude.json:/home/node/.claude.json
     tty: true
-
-volumes:
-  claude-config:
-    driver: local

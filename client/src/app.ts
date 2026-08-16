@@ -1,5 +1,4 @@
 import {
-  DEFAULT_KMONI_LAYER,
   KMONI_LAYER_LABELS,
   applyHomeAreas,
   formatJstClock,
@@ -16,11 +15,7 @@ import {
 import { AlertPresenter } from './core/alert.js';
 import { ServerConnection, type ConnectionState } from './core/connection.js';
 import { FrameStream } from './core/frameStream.js';
-import {
-  canUseBrowserLocation,
-  fetchHomeAssistantLocation,
-  requestBrowserLocation,
-} from './core/homeLocation.js';
+import { canUseBrowserLocation, requestBrowserLocation } from './core/homeLocation.js';
 import {
   MapView,
   ZOOM_RANGE,
@@ -82,8 +77,6 @@ export class App {
   private readonly splitter: Splitter;
 
   private quakes: QuakeInfo[] = [];
-  /** サーバーが既定で取っている指標 (hello で受け取る) */
-  private serverLayer: KmoniLayer = DEFAULT_KMONI_LAYER;
   private tsunami: TsunamiInfo | null = null;
   private eew: EewState | null = null;
   private clockTimer: number | null = null;
@@ -99,7 +92,6 @@ export class App {
     this.mapView = new MapView(
       requireElement<HTMLCanvasElement>('map'),
       {
-        glow: this.settings.glow,
         view: this.settings.view,
         interactive: !this.settings.locked,
         home: this.settings.home,
@@ -133,12 +125,10 @@ export class App {
       onPickHome: () => this.startHomePick(),
       canUseCurrentLocation: () => canUseBrowserLocation(),
       requestCurrentLocation: () => requestBrowserLocation(),
-      requestHomeAssistantLocation: () => fetchHomeAssistantLocation(),
       describeTsunamiAreas: () => {
         const areas = this.homeAreas();
         return areas.length > 0 ? areas.join('、') : '(利用地の県が分からないため無し)';
       },
-      serverLayer: () => this.serverLayer,
       hiddenQuakeCount: () => this.quakes.length - this.visibleQuakes().length,
     });
 
@@ -215,7 +205,6 @@ export class App {
   }
 
   private applySnapshot(snapshot: StateSnapshot): void {
-    this.serverLayer = snapshot.kmoniLayer;
     // hello の中で取り直しを頼むと堂々巡りになるので、ここでは反映だけ
     this.applyLayer(false);
     this.quakes = snapshot.quakes;
@@ -257,9 +246,9 @@ export class App {
     this.alert.applyFlash(this.eew, this.tsunami, this.settings.notifyForecast);
   }
 
-  /** いま表示する指標 (端末の選択 > サーバーの既定) */
+  /** いま表示する指標 (端末の選択) */
   private currentLayer(): KmoniLayer {
-    return this.settings.layer ?? this.serverLayer;
+    return this.settings.layer;
   }
 
   /** 指標を画面と取得先へ反映する */
@@ -290,7 +279,6 @@ export class App {
     this.settings = this.store.update(patch);
     this.alert.audio.setVolume(this.settings.volume);
     this.mapView.setOptions({
-      glow: this.settings.glow,
       view: this.settings.view,
       interactive: !this.settings.locked,
       home: this.settings.home,

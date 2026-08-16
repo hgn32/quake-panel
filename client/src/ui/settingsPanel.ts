@@ -39,12 +39,8 @@ export interface SettingsPanelDeps {
   canUseCurrentLocation: () => boolean;
   /** その端末の現在地 */
   requestCurrentLocation: () => Promise<HomeLocation>;
-  /** Home Assistant に設定されている自宅の位置 (未設定なら null) */
-  requestHomeAssistantLocation: () => Promise<HomeLocation | null>;
   /** 自動設定のときに、いま効いている予報区を見せるために使う */
   describeTsunamiAreas: () => string;
-  /** サーバーが既定にしている指標 (「サーバー既定」の中身を見せるため) */
-  serverLayer: () => KmoniLayer;
   /** 絞り込みで隠れている地震の件数 */
   hiddenQuakeCount: () => number;
 }
@@ -100,25 +96,49 @@ export class SettingsPanel {
    * 章立てで組む。
    *
    * 項目が増えて一列に並べると、何を触っているのか分からなくなる。
-   * 「音と明滅」「地図」「利用地」「地震情報」の 4 つに分け、各章の中は
-   * 「ラベル + 説明」と「操作部」の 2 列で揃える。
+   * 「利用地」「リアルタイム表示」「地震速報」「地震速報の通知」「津波予報」の
+   * 5 つに分け、各章の中は「ラベル + 説明」と「操作部」の 2 列で揃える。
    */
   private render(): void {
     const settings = this.deps.getSettings();
     replaceChildren(
       this.deps.form,
       this.section(
-        '音と明滅',
-        'この端末での気づかせ方。サーバーは常に予報も警報も受信しています。',
+        '利用地',
+        '地図の中心と、津波予報区の自動判定に使います。',
+        this.homeRow(settings),
+      ),
+      this.section(
+        'リアルタイム表示',
+        null,
+        this.layerRow(settings),
+        this.checkboxRow(
+          '表示位置を固定',
+          '地図の操作と、地震情報との境目のドラッグを受け付けなくします。常時表示の端末向け。',
+          settings.locked,
+          (checked) => this.deps.onChange({ locked: checked }),
+        ),
+      ),
+      this.section(
+        '地震速報',
+        'サーバーは常に予報も警報も受信しています。',
         this.radioRow(
           'EEW の通知範囲',
-          null,
+          '気象庁の基準で、震度5弱以上の強い揺れが予想される地域がある場合は「警報」、それに満たない場合は「予報」として発表されます。',
           [
             { value: 'all', label: '予報から通知', checked: settings.notifyForecast },
             { value: 'warning', label: '警報のみ通知', checked: !settings.notifyForecast },
           ],
           (value) => this.deps.onChange({ notifyForecast: value === 'all' }),
         ),
+        this.quakeFilterRow(settings),
+        this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
+          this.deps.onChange({ historyCount: value }),
+        ),
+      ),
+      this.section(
+        '地震速報の通知',
+        null,
         this.sliderRow(
           '音量',
           null,
@@ -163,35 +183,9 @@ export class SettingsPanel {
         ),
       ),
       this.section(
-        '地図',
-        null,
-        this.layerRow(settings),
-        this.checkboxRow(
-          '観測点を発光表示',
-          '拡大時の粗さが目立たなくなります。動作が重い場合は切ってください。',
-          settings.glow,
-          (checked) => this.deps.onChange({ glow: checked }),
-        ),
-        this.checkboxRow(
-          '表示位置を固定',
-          '地図の操作と、地震情報との境目のドラッグを受け付けなくします。常時表示の端末向け。',
-          settings.locked,
-          (checked) => this.deps.onChange({ locked: checked }),
-        ),
-      ),
-      this.section(
-        '利用地',
-        '地図の中心と、津波予報区の自動判定に使います。',
-        this.homeRow(settings),
+        '津波予報',
+        '強調表示する津波予報区を選びます。',
         this.tsunamiRow(settings),
-      ),
-      this.section(
-        '地震情報',
-        null,
-        this.quakeFilterRow(settings),
-        this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
-          this.deps.onChange({ historyCount: value }),
-        ),
       ),
     );
   }
@@ -229,17 +223,13 @@ export class SettingsPanel {
     return this.row(label, hint, select);
   }
 
-  /** 地図に出す指標。サーバーの既定に従うか、この端末だけ変えるか。 */
+  /** 地図に出す指標。この端末だけで変えられる。 */
   private layerRow(settings: Settings): HTMLElement {
-    const server = this.deps.serverLayer();
-    const options = [
-      { value: '', label: `サーバー既定 (${KMONI_LAYER_LABELS[server]})`, checked: settings.layer === null },
-      ...KMONI_LAYERS.map((layer) => ({
-        value: layer,
-        label: KMONI_LAYER_LABELS[layer],
-        checked: settings.layer === layer,
-      })),
-    ];
+    const options = KMONI_LAYERS.map((layer) => ({
+      value: layer,
+      label: KMONI_LAYER_LABELS[layer],
+      checked: settings.layer === layer,
+    }));
     return h(
       'div',
       { class: 'settings__row' },
@@ -249,20 +239,20 @@ export class SettingsPanel {
         h('span', { text: '地図に出す指標' }),
         h('span', {
           class: 'settings__hint',
-          text: 'この端末だけ変えられます。既定以外を選ぶと、その分だけサーバーが追加で取得します。',
+          text: 'リアルタイム震度以外を選ぶと、その分だけサーバーが追加で取得します。',
         }),
       ),
       h(
         'div',
         { class: 'settings__stack' },
         this.radioGroup('kmoni-layer', options, (value) => {
-          this.deps.onChange({ layer: value === '' ? null : (value as KmoniLayer) });
+          this.deps.onChange({ layer: value as KmoniLayer });
           this.render();
         }),
         // 選んだものの性格は操作部の下に出す (ラベル側に説明を 2 つ積むと窮屈)
         h('span', {
           class: 'settings__hint settings__hint--note',
-          text: KMONI_LAYER_NOTES[settings.layer ?? server],
+          text: KMONI_LAYER_NOTES[settings.layer],
         }),
       ),
     );
@@ -326,7 +316,7 @@ export class SettingsPanel {
   /**
    * 利用地。
    *
-   * 決め方は 4 つ (直接入力 / 地図をクリック / 現在地 / HA の自宅位置)。
+   * 決め方は 3 つ (直接入力 / 地図をクリック / 現在地)。
    * 自動取得はどれも「入力欄へ入れる」までで、確定は「保存」に任せる
    * (取消で開いた時点へ戻せる)。
    */
@@ -363,18 +353,6 @@ export class SettingsPanel {
         ),
       );
     }
-    buttons.push(
-      this.loadButton(
-        'HA の自宅位置を使う',
-        fixed,
-        status,
-        () => this.deps.requestHomeAssistantLocation(),
-        fill,
-        () => 'Home Assistant から自宅の位置を取得できませんでした。',
-        'Home Assistant に自宅の位置が設定されていません。',
-      ),
-    );
-
     return h(
       'div',
       { class: 'settings__row' },
@@ -458,6 +436,12 @@ export class SettingsPanel {
       select.append(option);
     });
     select.disabled = auto || fixed;
+    const levelsHint = h('span', {
+      class: 'settings__hint',
+      text:
+        '津波の高さの予想により4段階あります: 大津波警報(3mを超える)／津波警報(1mを超え3m以下)／' +
+        '津波注意報(20cm以上1m以下)／津波予報(20cm未満)。',
+    });
     const hint = h('span', { class: 'settings__hint' });
     const renderHint = (): void => {
       hint.textContent = fixed
@@ -496,6 +480,7 @@ export class SettingsPanel {
         'div',
         { class: 'settings__label' },
         h('span', { text: '強調する津波予報区' }),
+        levelsHint,
         hint,
       ),
       h('div', { class: 'settings__stack' }, mode, select),

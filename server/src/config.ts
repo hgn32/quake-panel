@@ -1,22 +1,9 @@
-import {
-  DEFAULT_HA_NOTIFY_FILTER,
-  DEFAULT_KMONI_LAYER,
-  parseKmoniLayer,
-  parseMinIntensity,
-  parsePrefectureList,
-  type HaNotifyFilter,
-  type KmoniLayer,
-} from '@quake-panel/shared';
+import { DEFAULT_KMONI_LAYER, parseKmoniLayer, type KmoniLayer } from '@quake-panel/shared';
 
 const num = (value: string | undefined, fallback: number): number => {
   if (value === undefined || value.trim() === '') return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
-};
-
-const bool = (value: string | undefined, fallback: boolean): boolean => {
-  if (value === undefined || value.trim() === '') return fallback;
-  return /^(1|true|yes|on)$/i.test(value.trim());
 };
 
 const str = (value: string | undefined, fallback: string): string =>
@@ -68,28 +55,6 @@ export interface Config {
   wsHeartbeatMs: number;
   /** 保持する地震情報の件数 */
   quakeHistorySize: number;
-  /**
-   * Home Assistant との連携 (アドオンとして動かすときだけ有効になる)。
-   * apiUrl か token が空なら何もしない。
-   */
-  homeAssistant: {
-    apiUrl: string;
-    token: string;
-    /**
-     * イベントとセンサーを流すか。
-     * 自宅位置の取得 (`/api/home-location`) はこの設定に関係なく使える。
-     */
-    notify: boolean;
-    /**
-     * 通知する地震の絞り込み。
-     * パネルの表示は端末ごとに絞れるが、HA への通知はサーバーが 1 か所で出すので
-     * ここで決める (自動化を全国の小さな地震で走らせないため)。
-     */
-    filter: HaNotifyFilter;
-    /** States API で作った状態は HA 再起動で消えるので入れ直す間隔 */
-    refreshMs: number;
-    timeoutMs: number;
-  };
   /** EEW を「表示終了」とみなすまでの時間 (ms) */
   eewRetentionMs: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -122,22 +87,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     wsHeartbeatMs: num(env['WS_HEARTBEAT_MS'], 30_000),
     quakeHistorySize: num(env['QUAKE_HISTORY_SIZE'], 12),
-    homeAssistant: {
-      apiUrl: str(env['HA_API_URL'], ''),
-      token: str(env['SUPERVISOR_TOKEN'], ''),
-      notify: bool(env['HA_NOTIFY'], true),
-      filter: {
-        minIntensity:
-          parseMinIntensity(env['HA_NOTIFY_MIN_INTENSITY']) ?? DEFAULT_HA_NOTIFY_FILTER.minIntensity,
-        prefectures: parsePrefectureList(str(env['HA_NOTIFY_PREFECTURES'], '')),
-        areas: parsePrefectureList(str(env['HA_NOTIFY_AREAS'], '')),
-      },
-      refreshMs: num(env['HA_STATE_REFRESH_MS'], 60_000),
-      timeoutMs: num(env['HA_REQUEST_TIMEOUT_MS'], 4000),
-    },
     eewRetentionMs: num(env['EEW_RETENTION_MS'], 180_000),
     logLevel: (str(env['LOG_LEVEL'], 'info') as Config['logLevel']),
   };
 }
-
-export const IS_DEV = bool(process.env['DEV'], false);

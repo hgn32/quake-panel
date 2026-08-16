@@ -101,17 +101,6 @@ sudo htpasswd -c /etc/nginx/quake-panel.htpasswd <ユーザー名>
 
 Pi4 側は `deploy/kiosk/` を参照。
 
-### Home Assistant アドオン
-
-自分で nginx を立てる代わりに、Home Assistant のアドオンとして動かすこともできる。
-アドオン定義は [hgn32/ha-addons](https://github.com/hgn32/ha-addons) の
-`quake-panel/` にあり、このリポジトリの特定のコミットを固定してビルドする。
-
-Ingress 経由で開くと HA のログイン (入場制限) がそのまま利用条件 §2(1) の
-要件を満たすので、Basic 認証の設定は要らない。Pi4 のキオスクからは認証なしで
-開きたいので、アドオンは LAN 向けに直接ポートも開ける
-(インターネットへ素で公開しないこと、という条件は変わらない)。
-
 ### コーディング規約
 
 `.claude/instructions/typescript.instructions.md` の規約に全面的に合わせてある。
@@ -119,7 +108,7 @@ Ingress 経由で開くと HA のログイン (入場制限) がそのまま利�
 | 規約 | この実装での扱い |
 |---|---|
 | `for` 禁止 | `forEach` / `filter` / `map` / `Array.from` に置き換え。塊の探索 (flood fill) だけは `while` (スタックが空になるまで回す性質のため) |
-| `await` 禁止 | すべて `Promise` の連鎖。逐次実行が要る所は `reduce` で鎖にする (`haNotify.pushRound`) |
+| `await` 禁止 | すべて `Promise` の連鎖。逐次実行が要る所は `.then` を鎖にする |
 | `any` / `unknown` 禁止 | JSON 由来の値は `JsonValue` (`shared/src/homeLocation.ts`) で受ける。例外は `describeError(error: Error)` に `as Error` で渡す |
 | `console.log` 禁止 | サーバーのログは `process.stdout.write` / `process.stderr.write` (`server/src/logger.ts`)。クライアントは何も出さない |
 | `!` 禁止 | 使っていない。`?? 0` や `null` チェックで処理する |
@@ -153,25 +142,30 @@ npm run typecheck
 
 ### サーバー (環境変数)
 
+`.env.example` には**既定のままでは困る 3 つ**だけ書いてある。以下はすべて既定で動くので、
+変えたいときだけ `.env` に足す。時刻は環境の `TZ` に関係なく JST 固定で扱う。
+
 | 変数 | 既定 | 説明 |
 |---|---|---|
-| `PORT` / `HOST` | `8080` / `0.0.0.0` | 待ち受け |
-| `STATIC_DIR` | `public` | クライアントのビルド成果物の場所 |
-| `HA_API_URL` | (空) | Home Assistant のコア API (アドオンでは `http://supervisor/core/api`)。EEW 等の通知と、自宅位置の取得に使う |
-| `SUPERVISOR_TOKEN` | (空) | 上記の認証トークン。Supervisor がアドオンへ自動で渡す |
-| `HA_NOTIFY` | `true` | `false` で HA への通知を止める。**自宅位置の取得 (`/api/home-location`) は止まらない** |
-| `HA_NOTIFY_MIN_INTENSITY` | (なし) | HA へ通知する最小震度。`震度4以上` のようなラベルでも `40` のような整数コードでも書ける。解釈できない値は「絞り込みなし」に落として起動は続ける |
-| `HA_NOTIFY_PREFECTURES` | (空) | HA へ通知する都道府県 (カンマ / 読点区切り)。空なら全国 |
-| `HA_NOTIFY_AREAS` | (空) | HA へ通知する細分区域 (気象庁の「地域」。例: `宮崎県南部平野部`)。都道府県と併用したときは**どちらかに当たれば通知**する。津波には効かない |
+| `STATIC_DIR` | `public` | クライアントのビルド成果物の場所。ローカルでは `client/dist` を指す |
 | `KMONI_LAYER` | `acmap` | 地図に出す指標。`acmap` (最大加速度・既定) / `jma` (リアルタイム震度) / `vcmap` (最大速度) / `dcmap` (最大変位)。端末が別の指標を選んだときだけ、その分も追加で取得する |
+| `UPSTREAM_API_PROXY_URL` | なし | 上流 API へプロキシ経由で出るときに設定する。HTTP 取得も WebSocket も同じ値を使う。未設定なら直接接続。標準の `HTTP_PROXY` 等は見ない |
+| `PORT` / `HOST` | `8080` / `0.0.0.0` | 待ち受け |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error`。調査したいときだけ `LOG_LEVEL=debug npm start` |
 | `KMONI_IDLE_FRAME_INTERVAL_SEC` | `1` | 平常時の画像取得間隔 (秒)。負荷を抑えたいなら `2` |
 | `KMONI_ACTIVE_FRAME_INTERVAL_SEC` | `1` | EEW 発表中の画像取得間隔 (秒) |
 | `KMONI_EEW_INTERVAL_MS` | `1000` | EEW JSON のポーリング間隔 |
+| `KMONI_CLOCK_SYNC_INTERVAL_MS` | `60000` | 基準時刻 (`latest.json`) の再同期間隔 |
+| `KMONI_FRAME_LAG_SECONDS` | `2` | 画像取得を現在時刻から何秒遅らせるか |
+| `KMONI_REQUEST_TIMEOUT_MS` | `4000` | 上流 HTTP のタイムアウト |
 | `KMONI_DEGRADE_AFTER_FAILURES` | `5` | 連続失敗が何回で劣化モードに落ちるか |
+| `KMONI_FRAME_CACHE_SIZE` | `30` | 保持するフレーム数 (取りこぼし救済用) |
+| `KMONI_BASE_URL` | `http://www.kmoni.bosai.go.jp` | 上流の宛先。モックサーバーに向けると上流を叩かずに確認できる |
+| `P2P_WS_URL` / `P2P_HISTORY_URL` | `wss://api.p2pquake.net/v2/ws` / `https://api.p2pquake.net/v2/history` | 上流の宛先 |
+| `P2P_RECONNECT_MIN_MS` / `P2P_RECONNECT_MAX_MS` | `1000` / `60000` | 再接続待ちの下限と上限 |
 | `EEW_RETENTION_MS` | `180000` | 続報が途切れてから EEW 表示を消すまで |
 | `WS_HEARTBEAT_MS` | `30000` | クライアント WS の ping 間隔 |
 | `QUAKE_HISTORY_SIZE` | `12` | 保持する地震情報の件数 |
-| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 
 ### 端末ごとの設定 (画面右上の「設定」)
 
@@ -193,7 +187,7 @@ npm run typecheck
   鳴り続ける・光り続けるのを避けるため)。EEW のパネル表示自体は消さない
 - **履歴に出す地震**: 最大震度のしきい値と、「利用地の都道府県で揺れたものだけ」で絞れる。
   台湾付近の地震のように、国内の一部だけがわずかに揺れた情報を落とせる
-- **利用地**: 決め方は 4 つ。地図の中心と、津波予報区の自動判定に使う (地名は入力しない)
+- **利用地**: 決め方は 3 つ。地図の中心と、津波予報区の自動判定に使う (地名は入力しない)
   - 緯度経度を直接入れる
   - 「地図から選ぶ」でクリックして決める。クリックしただけでは確定せず、
     地図上の帯で「決定」するまで保存されない
@@ -202,9 +196,6 @@ npm run typecheck
     素の HTTP で開いているときはボタン自体を出さない。
     許可ダイアログを閉じられるとブラウザから応答が来ないことがあるので、
     30 秒で自前で打ち切って理由を出す (`client/src/core/homeLocation.ts`)
-  - 「HA の自宅位置を使う」で Home Assistant に設定されている自宅の緯度経度を使う。
-    HTTP でも使えるので、キオスク端末ではこちらが唯一の自動取得手段になる。
-    HA 側が未設定 (`0,0`) のときは「設定されていません」と出す
 - **強調する津波予報区**: 既定は利用地の都道府県から自動で決める。
   予報区名は県名と一致しないもの (「東京湾内湾」「有明・八代海」等) があるため、
   県ごとの補助表を持っている (`shared/src/tsunami.ts`)。手動で県を選ぶこともできる
@@ -236,100 +227,6 @@ URL で指定されている項目は設定画面でも編集できないよう�
 |---|---|---|
 | `lat` / `lon` | `?lat=35.681&lon=139.767` | 利用地。両方揃っているときだけ効く |
 | `tsunami` | `?tsunami=東京都,千葉県` | 強調する津波予報区 (カンマ区切り) |
-
----
-
-## Home Assistant との連携
-
-`HA_API_URL` と `SUPERVISOR_TOKEN` があるとき (= HA のアドオンとして動いているとき)、
-コア API を使って次の 2 つを行う。
-
-| 用途 | 向き | `HA_NOTIFY=false` のとき |
-|---|---|---|
-| 緊急地震速報などの通知 (イベント / センサー) | パネル → HA | 止まる |
-| 自宅の緯度経度の取得 (`GET /api/home-location`) | HA → パネル | **止まらない** |
-
-自宅位置は利用地を決めるときの補助にだけ使う。取得できなければ 204 を返すだけで、
-パネルの表示は何も変わらない。
-
-### 通知
-
-緊急地震速報などを Home Assistant へ流す。**画面を見ていなくても HA 側で気づける**
-ようにするためで、「EEW が出たらダッシュボードを地震パネルに切り替える」
-といった自動化に使える。
-
-### 通知する地震を絞る
-
-全国の小さな地震まで自動化が走ると、照明やダッシュボードが毎日切り替わってしまうので、
-`HA_NOTIFY_MIN_INTENSITY` (最小震度) と `HA_NOTIFY_PREFECTURES` (都道府県) で絞れる。
-既定は絞り込みなし (全国・全震度)。
-
-- 画面の「履歴に出す地震」の絞り込みとは**別物**。画面には出したいが自動化は
-  起こしたくない、という組み合わせが普通にあるため共有していない
-- 震度のしきい値を設けているとき、震度の分からない電文 (震源に関する情報など) は落とす
-- 都道府県の見方は情報ごとに違う
-  | 情報 | 判定に使うもの |
-  |---|---|
-  | 地震情報 | 観測点の都道府県 |
-  | 緊急地震速報 | 予想震度が出ている地域名。地域がまだ来ていない第一報は落とさない (震度の条件だけ見る) |
-  | 津波予報 | **画面と同じ判定** (`applyHomeAreas` の `affectsHome`)。県から津波予報区を引き直すので、「東北地方太平洋沿岸」のような広域の区や「有明・八代海」のような湾の区も拾う |
-- **細分区域 (`HA_NOTIFY_AREAS`) で都道府県より細かく絞れる。** 選択肢は気象庁
-  「地震火山関連コード表」シート24 の 188 区で、対応表は
-  `server/src/data/seismicAreas.ts` に機械的に起こしてある (サーバー専用。
-  4000 件を超えるので画面へは配らない)。P2P の電文との対応は実データで確認済み
-  - 地震情報 `points[].isArea = true` → `addr` は細分区域名 (実測 37/37 一致)
-  - 地震情報 `points[].isArea = false` → `addr` は震度観測点名 (実測 1908/1908 一致)
-  - 緊急地震速報 `areas[].name` → 細分区域名 (完全一致で判定)
-  - 都道府県と併用したときは**どちらかに当たれば通知**する (AND ではない)
-  - **津波には効かない。** 津波は細分区域ではなく津波予報区で発表され、語彙が別物
-- **震度のしきい値は津波には効かない。** 津波に震度は無く、遠地地震で震度が小さくても
-  津波は来る (2010年チリ地震など)
-- **取消報・津波の解除・「発表なし」は絞り込みに関わらず必ず流す。** ここで黙ると、
-  自動化で点けた照明やダッシュボードが戻せなくなる。
-  同じ理由で、一度流した地震・津波の続報は、下方修正や対象区の縮小で条件を
-  外れても流し続ける
-- 起動時に何を通知するかをログへ出す (例: `通知条件: 震度4以上 / 宮崎県`)
-
-### イベント
-
-続報のたびではなく、**意味が変わったときだけ**発火する
-(同じ地震で震度や警報種別が変わらない続報では出さない)。
-上記の絞り込みで落ちたものは、イベントもエンティティも動かない。
-
-| イベント | いつ | 主なデータ |
-|---|---|---|
-| `quake_panel_eew` | 緊急地震速報の受信・格上げ・取消 | `is_warning` / `max_intensity` / `hypocenter` / `report_number` / `is_cancel` / `is_training` |
-| `quake_panel_tsunami` | 津波予報の発表・解除 | `active` / `areas` / `grades` |
-| `quake_panel_quake` | 地震情報 (551) の受信 | `max_intensity` / `hypocenter` / `magnitude` / `occurred_at` |
-
-### エンティティ
-
-| エンティティ | 内容 |
-|---|---|
-| `binary_sensor.quake_panel_eew` | 緊急地震速報の発表中 (訓練報・取消では `off`) |
-| `sensor.quake_panel_eew_intensity` | 予想最大震度 (`5強` など) |
-| `binary_sensor.quake_panel_tsunami` | 津波予報の発表中 |
-| `sensor.quake_panel_last_quake` | 最新の地震情報の最大震度 |
-
-States API で作る状態は HA を再起動すると消えるため、60 秒ごとに入れ直している
-(`HA_STATE_REFRESH_MS`)。通知が失敗してもパネルの表示は止めない。
-
-### 自動化の例
-
-```yaml
-automation:
-  - alias: 緊急地震速報でダッシュボードを切り替える
-    triggers:
-      - trigger: event
-        event_type: quake_panel_eew
-    conditions:
-      - condition: template
-        value_template: "{{ trigger.event.data.is_warning and not trigger.event.data.is_training }}"
-    actions:
-      - action: browser_mod.navigate
-        data:
-          path: /lovelace/quake
-```
 
 ---
 
@@ -365,21 +262,18 @@ automation:
   素通しする構成は、全クライアントがサーバー IP 発になるため即座に制限へ抵触する。
 - **外部への通信量はクライアント数に依存しない**。平常時でおよそ 8.5KB/s
   (画像 7.9KB + EEW JSON 0.5KB 前後) ≒ 1 日 700MB 程度。
-  抑えたい場合は `KMONI_IDLE_FRAME_INTERVAL_MS=2000` で半分になる。
+  抑えたい場合は `KMONI_IDLE_FRAME_INTERVAL_SEC=2` で半分になる。
 
 ### クライアント → サーバー
 
 クライアント (Pi4 の Chromium) が話す相手は**このコンテナだけ**。
 リバースプロキシで https/wss を終端し、プロキシ↔コンテナ間は平文で構わない。
 
-表の**パスはサーバーから見たもの**で、公開 URL がこの通りとは限らない。
-Home Assistant の Ingress のように前置きパスの下へ置かれる場合、Supervisor は
-前置きを剥がしてから中継するのでサーバー側は何も変わらず、ずれるのは
-ブラウザ側の相対解決だけになる。そのため、
-**サーバーは `X-Ingress-Path` があれば `index.html` へ `<base href>` を差し込み**
-(`server/src/http/indexHtml.ts`)、**クライアントは全ての要求を
-`document.baseURI` 基準で組み立てる** (`client/src/core/urls.ts`)。
-素で `/` 直下に置いたときは `<base>` が入らず、従来どおりの絶対パスになる。
+表の**パスはサーバーから見たもの**。リバースプロキシは設定例
+(`deploy/nginx/quake-panel.conf`) のとおりルート直下で中継する想定。
+前置きパス付きで公開する場合はプロキシ側で前置きを剥がして中継すること
+(クライアントは要求を `document.baseURI` 基準の相対で組み立てる —
+`client/src/core/urls.ts`)。
 
 | パス | プロトコル | 用途 |
 |---|---|---|

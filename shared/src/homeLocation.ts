@@ -1,10 +1,10 @@
 /**
  * 利用地 (緯度経度) の読み取り。
  *
- * 同じ形の値を 3 か所で扱う。
+ * 同じ形の値を複数箇所で扱う。
  *
- * - Home Assistant のコア API (`latitude` / `longitude`)
- * - このサーバーの `/api/home-location` (`lat` / `lon`)
+ * - 保存された利用地・URL パラメータなどの `lat` / `lon`
+ * - 外部 API 由来の `latitude` / `longitude`
  * - ブラウザの位置情報 API (`coords.latitude` / `coords.longitude`)
  *
  * 取り違えと範囲外の値を一か所で止めるため、検証はここに集める。
@@ -36,7 +36,7 @@ export function parseHomeLocation(value: JsonValue): HomeLocation | null {
   const lon = pickNumber(value['lon'], value['longitude']);
   if (lat === null || lon === null) return null;
   if (!isLat(lat) || !isLon(lon)) return null;
-  // HA で位置を設定していないと 0,0 (ギニア湾) が返る。
+  // 外部 API には位置未設定のとき 0,0 (ギニア湾沖) を返すものがある。
   // 地図が世界の反対側へ飛ぶので「未設定」として扱う。
   if (lat === 0 && lon === 0) return null;
   return { lat, lon };

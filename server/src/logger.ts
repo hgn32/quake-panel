@@ -11,7 +11,7 @@ export function setLogLevel(level: Level): void {
 /**
  * 1 行書き出す。
  *
- * Home Assistant のログタブは標準出力/標準エラーをそのまま出すので、
+ * ログは Docker (`docker logs`) が標準出力/標準エラーを拾う前提なので、
  * ここが唯一の出力口になる (console は使わない)。
  */
 function emit(level: Level, scope: string, message: string, extra?: string): void {

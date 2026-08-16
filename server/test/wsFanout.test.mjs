@@ -4,18 +4,18 @@ import { describe, it } from 'node:test';
 import { WebSocket } from 'ws';
 
 import { loadConfig } from '../dist/config.js';
-import { HomeAssistantNotifier } from '../dist/haNotify.js';
 import { Hub } from '../dist/hub.js';
 import { ClientWebSocketServer } from '../dist/ws/server.js';
 
 /**
- * アドオンの絞り込み (HA_NOTIFY_*) は HA への通知だけに効き、
- * ブラウザへの配信には一切効かない、という設計をそのまま確かめる。
+ * Hub の 2 つ目の購読者が自分の都合で絞り込んでも、それは WebSocket 配信には
+ * 一切効かない、という設計をそのまま確かめる。
  *
  * hubIsolation.test.mjs は Hub のリスナーを直接覗いているので、
  * 「WebSocket に載せるところで絞られていないか」までは見ていない。
  * ここでは**本物の ClientWebSocketServer に本物の WebSocket で繋いで**、
- * 絞り込みで落ちるはずの地震・津波が画面側にはそのまま届くことを確かめる。
+ * 2 つ目の購読者が絞り込んで無視するはずの地震・津波が画面側にはそのまま
+ * 届くことを確かめる。
  */
 const point = (pref, scale) => ({ pref, addr: `${pref}某所`, isArea: false, scale });
 
@@ -52,67 +52,68 @@ const TSUNAMI = {
 };
 
 /**
- * 偽の HA・本物の HTTP/WS サーバーを立て、本物の WebSocket で 1 台繋いだ状態で
- * publish する。画面側が受け取ったメッセージと、HA へ飛んだ URL を両方返す。
+ * Hub の 2 つ目の購読者を模した、その場限りの最小リスナー。
+ *
+ * Hub は配信 (ws) 専用ではなく、それ以外にも同じイベントを購読する
+ * 購読者がいる構成になっている。ここでは実際の通知先を持たず、「自分の
+ * 絞り込み条件を通ったイベントだけ記録する」だけの疑似リスナーで代替する。
  */
-const withPanel = (env, publish) => {
-  const haCalls = [];
-  const ha = createServer((req, res) => {
-    req.resume();
-    req.on('end', () => {
-      haCalls.push(req.url);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end('{}');
-    });
+const attachFilteringListener = (hub, { minIntensity = 0, prefectures = [] } = {}) => {
+  const accepted = [];
+  hub.on('event', (event) => {
+    if (event.type === 'quake') {
+      if (event.quake.maxIntensity < minIntensity) return;
+      if (prefectures.length > 0 && !event.quake.points.some((p) => prefectures.includes(p.pref))) return;
+    }
+    if (event.type === 'tsunami') {
+      // 津波には震度が無いので minIntensity は効かせない (本物の設計と同じ)
+    }
+    accepted.push(event.type);
   });
-  const http = createServer();
-  let ws;
-  let notifier;
-
-  return new Promise((resolve) => ha.listen(0, '127.0.0.1', resolve))
-    .then(() => new Promise((resolve) => http.listen(0, '127.0.0.1', resolve)))
-    .then(() => {
-      const config = loadConfig({
-        HA_API_URL: `http://127.0.0.1:${ha.address().port}/api`,
-        SUPERVISOR_TOKEN: 'test-token',
-        ...env,
-      });
-      const hub = new Hub(config);
-      notifier = new HomeAssistantNotifier(config, hub);
-      notifier.start();
-      const wsServer = new ClientWebSocketServer(http, config, hub);
-      wsServer.start();
-
-      const received = [];
-      ws = new WebSocket(`ws://127.0.0.1:${http.address().port}/ws`);
-      ws.on('message', (data) => received.push(JSON.parse(String(data))));
-
-      return new Promise((resolve) => ws.on('open', resolve))
-        .then(() => new Promise((resolve) => setTimeout(resolve, 100)))
-        .then(() => {
-          publish(hub);
-          return new Promise((resolve) => setTimeout(resolve, 400));
-        })
-        .then(() => {
-          ws.close();
-          notifier.stop();
-          wsServer.stop?.();
-          http.close();
-          ha.close();
-          return { received, haCalls };
-        });
-    });
+  return accepted;
 };
 
-describe('アドオンの絞り込みはブラウザ配信に効かない (本物の WebSocket で確認)', () => {
-  it('絞り込みで落ちる地震・津波も、画面へはそのまま届く', () =>
-    withPanel(
-      { HA_NOTIFY_MIN_INTENSITY: '震度5弱以上', HA_NOTIFY_PREFECTURES: '宮崎県' },
-      (hub) => {
-        hub.publishQuake(QUAKE);
-        hub.publishTsunami(TSUNAMI);
-      },
-    ).then(({ received, haCalls }) => {
+/**
+ * 本物の HTTP/WS サーバーを立て、本物の WebSocket で 1 台繋いだ状態で
+ * publish する。画面側が受け取ったメッセージと、疑似リスナーが「通知した」
+ * 種別を両方返す。
+ */
+const withPanel = (filterOptions, publish) => {
+  const http = createServer();
+  let ws;
+
+  return new Promise((resolve) => http.listen(0, '127.0.0.1', resolve)).then(() => {
+    const config = loadConfig({});
+    const hub = new Hub(config);
+    const notifierAccepted = attachFilteringListener(hub, filterOptions);
+    const wsServer = new ClientWebSocketServer(http, config, hub);
+    wsServer.start();
+
+    const received = [];
+    ws = new WebSocket(`ws://127.0.0.1:${http.address().port}/ws`);
+    ws.on('message', (data) => received.push(JSON.parse(String(data))));
+
+    return new Promise((resolve) => ws.on('open', resolve))
+      .then(() => new Promise((resolve) => setTimeout(resolve, 100)))
+      .then(() => {
+        publish(hub);
+        return new Promise((resolve) => setTimeout(resolve, 400));
+      })
+      .then(() => {
+        ws.close();
+        wsServer.stop?.();
+        http.close();
+        return { received, notifierAccepted };
+      });
+  });
+};
+
+describe('もう一方の購読者の絞り込みはブラウザ配信に効かない (本物の WebSocket で確認)', () => {
+  it('もう一方が絞り込みで無視する地震・津波も、画面へはそのまま届く', () =>
+    withPanel({ minIntensity: 50, prefectures: ['宮崎県'] }, (hub) => {
+      hub.publishQuake(QUAKE);
+      hub.publishTsunami(TSUNAMI);
+    }).then(({ received, notifierAccepted }) => {
       const quake = received.find((m) => m.type === 'quake');
       assert.ok(quake, '地震情報が WebSocket に届いていない');
       // 震度も観測点も削られていない
@@ -126,27 +127,24 @@ describe('アドオンの絞り込みはブラウザ配信に効かない (本�
       assert.equal(tsunami.tsunami.areas[0].isHome, false);
       assert.equal(tsunami.tsunami.affectsHome, false);
 
-      // HA 側へはイベントが飛んでいない (絞り込みで落ちている)
+      // もう一方の購読者側は絞り込みで無視している (地震は震度・県ともに条件外)
       assert.deepEqual(
-        haCalls.filter((url) => url.startsWith('/api/events/')),
+        notifierAccepted.filter((type) => type === 'quake'),
         [],
-        'HA へは通知されないはず',
+        'もう一方の購読者は地震を受け入れないはず',
       );
     }));
 
-  it('絞り込みを通る地震は、画面にも HA にも届く', () =>
-    withPanel({ HA_NOTIFY_MIN_INTENSITY: '震度1以上' }, (hub) => {
+  it('もう一方の絞り込みを通る地震は、画面にも通知先にも届く', () =>
+    withPanel({ minIntensity: 1 }, (hub) => {
       hub.publishQuake(QUAKE);
-    }).then(({ received, haCalls }) => {
+    }).then(({ received, notifierAccepted }) => {
       assert.ok(received.find((m) => m.type === 'quake'), '画面へ届いていない');
-      assert.ok(
-        haCalls.some((url) => url === '/api/events/quake_panel_quake'),
-        'HA へ届いていない',
-      );
+      assert.ok(notifierAccepted.includes('quake'), 'もう一方の購読者へ届いていない');
     }));
 
   it('接続直後のスナップショットも絞り込まれない', () =>
-    withPanel({ HA_NOTIFY_PREFECTURES: '宮崎県' }, (hub) => {
+    withPanel({ minIntensity: 0, prefectures: ['宮崎県'] }, (hub) => {
       hub.publishQuake(QUAKE);
     }).then(({ received }) => {
       const hello = received.find((m) => m.type === 'hello');
