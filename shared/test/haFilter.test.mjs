@@ -7,6 +7,7 @@ import {
   parsePrefectureList,
   shouldNotifyEew,
   shouldNotifyQuake,
+  shouldNotifyTsunami,
 } from '../dist/index.js';
 
 const point = (pref, scale) => ({ pref, addr: `${pref}某所`, isArea: false, scale });
@@ -140,5 +141,67 @@ describe('設定値の解釈', () => {
     assert.deepEqual(parsePrefectureList('宮崎県、鹿児島県'), ['宮崎県', '鹿児島県']);
     assert.deepEqual(parsePrefectureList(''), []);
     assert.deepEqual(parsePrefectureList(' , '), []);
+  });
+});
+
+const tsunamiArea = (name) => ({
+  name,
+  grade: 'Watch',
+  immediate: false,
+  firstHeightCondition: null,
+  firstHeightArrivalTime: null,
+  maxHeightDescription: null,
+  maxHeightValue: null,
+  isHome: false,
+});
+
+const tsunami = (names, extra = {}) => ({
+  id: 't1',
+  issuedAt: null,
+  cancelled: false,
+  areas: names.map(tsunamiArea),
+  affectsHome: false,
+  receivedAt: '2026-08-15T10:00:00.000Z',
+  ...extra,
+});
+
+describe('HA へ通知する津波予報の絞り込み', () => {
+  it('既定 (全国) では何も落とさない', () => {
+    assert.equal(shouldNotifyTsunami(tsunami(['北海道太平洋沿岸東部']), DEFAULT_HA_NOTIFY_FILTER), true);
+  });
+
+  it('対象の県に関わる予報区だけ流す', () => {
+    const filter = { minIntensity: 0, prefectures: ['宮崎県'] };
+    assert.equal(shouldNotifyTsunami(tsunami(['宮崎県']), filter), true);
+    assert.equal(shouldNotifyTsunami(tsunami(['北海道太平洋沿岸東部']), filter), false);
+  });
+
+  it('画面と同じで、県名を含まない広域の予報区も拾う', () => {
+    // 津波警報の第一報で使われる。県名だけの部分一致では落ちてしまう区。
+    const miyagi = { minIntensity: 0, prefectures: ['宮城県'] };
+    assert.equal(shouldNotifyTsunami(tsunami(['東北地方太平洋沿岸']), miyagi), true);
+    const kagawa = { minIntensity: 0, prefectures: ['香川県'] };
+    assert.equal(shouldNotifyTsunami(tsunami(['瀬戸内海沿岸']), kagawa), true);
+    const kumamoto = { minIntensity: 0, prefectures: ['熊本県'] };
+    assert.equal(shouldNotifyTsunami(tsunami(['有明・八代海']), kumamoto), true);
+    // 無関係な県は拾わない
+    assert.equal(shouldNotifyTsunami(tsunami(['東北地方太平洋沿岸']), kagawa), false);
+  });
+
+  it('複数県を指定するとどれかに関われば流す', () => {
+    const filter = { minIntensity: 0, prefectures: ['宮崎県', '新潟県'] };
+    assert.equal(shouldNotifyTsunami(tsunami(['佐渡']), filter), true);
+  });
+
+  it('震度のしきい値は津波には効かない (遠地地震でも津波は来る)', () => {
+    const filter = { minIntensity: 55, prefectures: ['宮崎県'] };
+    assert.equal(shouldNotifyTsunami(tsunami(['宮崎県']), filter), true);
+  });
+
+  it('解除・対象なし・発表なしは絞り込みに関わらず流す', () => {
+    const filter = { minIntensity: 0, prefectures: ['宮崎県'] };
+    assert.equal(shouldNotifyTsunami(null, filter), true);
+    assert.equal(shouldNotifyTsunami(tsunami(['北海道太平洋沿岸東部'], { cancelled: true }), filter), true);
+    assert.equal(shouldNotifyTsunami(tsunami([]), filter), true);
   });
 });
