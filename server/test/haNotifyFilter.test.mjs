@@ -102,10 +102,18 @@ describe('HA_NOTIFY_MIN_INTENSITY / HA_NOTIFY_PREFECTURES', () => {
 
   it('ログに出す説明で何が届かないか分かる', () => {
     assert.equal(
-      describeFilter({ minIntensity: 45, prefectures: ['宮崎県'] }),
+      describeFilter({ minIntensity: 45, prefectures: ['宮崎県'], areas: [] }),
       '通知条件: 震度5弱以上 / 宮崎県',
     );
-    assert.equal(describeFilter({ minIntensity: 0, prefectures: [] }), '通知条件: 震度の条件なし / 全国');
+    assert.equal(
+      describeFilter({ minIntensity: 0, prefectures: [], areas: [] }),
+      '通知条件: 震度の条件なし / 全国',
+    );
+    // 細分区域も同じ行に出す (ログタブだけで何が届かないか分かるように)
+    assert.equal(
+      describeFilter({ minIntensity: 0, prefectures: ['宮崎県'], areas: ['熊本県熊本'] }),
+      '通知条件: 震度の条件なし / 宮崎県・熊本県熊本',
+    );
   });
 });
 
