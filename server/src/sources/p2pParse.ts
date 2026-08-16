@@ -27,6 +27,14 @@ export function toIntensity(scale: number | undefined | null): IntensityLevel | 
 const nz = (value: number | undefined): number | null =>
   value == null || !Number.isFinite(value) || value === -1 ? null : value;
 
+/**
+ * 緯度経度。P2P は震源不明を -200 で表す (JSON API v2 仕様書に明記。551/556 とも)。
+ * -200 を座標として通すと eewRelevance の距離判定に入り、「震央不明 → 鳴らす側に倒す」
+ * が「遠方 → 無音」に化けるため、範囲外はすべて不明として落とす。
+ */
+const coord = (value: number | undefined, limit: number): number | null =>
+  value == null || !Number.isFinite(value) || Math.abs(value) > limit ? null : value;
+
 export function parseQuake(msg: P2PQuake, receivedAt: Date): QuakeInfo {
   const eq = msg.earthquake ?? {};
   const hypo = eq.hypocenter ?? {};
@@ -37,8 +45,8 @@ export function parseQuake(msg: P2PQuake, receivedAt: Date): QuakeInfo {
     issueType: msg.issue?.type ?? 'Unknown',
     hypocenter: {
       name: hypo.name?.trim() || '不明',
-      lat: nz(hypo.latitude),
-      lon: nz(hypo.longitude),
+      lat: coord(hypo.latitude, 90),
+      lon: coord(hypo.longitude, 180),
       depthKm: nz(hypo.depth),
       magnitude: nz(hypo.magnitude),
     },
@@ -128,8 +136,8 @@ export function parseEew(msg: P2PEew, receivedAt: Date): EewState {
     alert: 'warning',
     hypocenter: {
       name: hypo.name?.trim() || '不明',
-      lat: nz(hypo.latitude),
-      lon: nz(hypo.longitude),
+      lat: coord(hypo.latitude, 90),
+      lon: coord(hypo.longitude, 180),
       depthKm: nz(hypo.depth),
       magnitude: nz(hypo.magnitude),
     },

@@ -90,4 +90,50 @@ describe('kmoni EEW JSON の解釈', () => {
   it('report_id が無ければ発表として扱わない', () => {
     assert.equal(parseKmoniEew({ ...FORECAST, report_id: '' }), null);
   });
+
+  /** 2026-07-29 22:19 の熊本の警報級 EEW について、発表時に実際に返ってきたレスポンス (実測、一字も変えていない) */
+  const REAL_KUMAMOTO_WARNING = {
+    result: { status: 'success', message: '', is_auth: true },
+    report_time: '2026/07/29 22:19:44',
+    region_code: '',
+    request_time: '202607292219%s',
+    region_name: '熊本県天草・芦北地方',
+    longitude: '130.5',
+    is_cancel: false,
+    depth: '10km',
+    calcintensity: '5弱',
+    is_final: false,
+    is_training: false,
+    latitude: '32.4',
+    origin_time: '20260729221936',
+    security: {
+      realm: '/kyoshin_monitor/static/jsondata/eew_est/',
+      hash: 'b61e4d95a8c42e004665825c098a6de4',
+    },
+    magunitude: '4.5',
+    report_num: '5',
+    report_id: '20260729221939',
+    alertflg: '警報',
+  };
+
+  it('発表時の実レスポンス (2026-07-29 熊本、実測) をそのまま読める', () => {
+    const report = parseKmoniEew(REAL_KUMAMOTO_WARNING);
+    assert.ok(report);
+    // P2P 556 実電文の issue.eventId ('20260729221939') と完全一致する。
+    // kmoni と P2P の同一地震統合はこの ID 一致で成立している。
+    assert.equal(report.id, '20260729221939');
+    assert.equal(report.alert, 'warning');
+    assert.equal(report.reportNumber, 5);
+    assert.equal(report.isCancel, false);
+    assert.equal(report.isFinal, false);
+    assert.equal(report.isTraining, false);
+    assert.equal(report.hypocenter.name, '熊本県天草・芦北地方');
+    assert.equal(report.hypocenter.lat, 32.4);
+    assert.equal(report.hypocenter.lon, 130.5);
+    assert.equal(report.hypocenter.depthKm, 10);
+    assert.equal(report.hypocenter.magnitude, 4.5);
+    assert.equal(report.maxIntensity, 45);
+    assert.equal(report.originTime.toISOString(), '2026-07-29T13:19:36.000Z');
+    assert.equal(report.announcedAt.toISOString(), '2026-07-29T13:19:44.000Z');
+  });
 });

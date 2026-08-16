@@ -81,7 +81,8 @@ describe('P2P 551 (地震情報)', () => {
         code: 551,
         id: 'x',
         earthquake: {
-          hypocenter: { depth: -1, latitude: -1, longitude: -1, magnitude: -1, name: '' },
+          // 仕様書上、深さ・マグニチュードの不明は -1、緯度経度の不明は -200 (別センチネル)
+          hypocenter: { depth: -1, latitude: -200, longitude: -200, magnitude: -1, name: '' },
           maxScale: 30,
           time: '2026/08/13 08:56:00',
         },
@@ -90,12 +91,37 @@ describe('P2P 551 (地震情報)', () => {
       },
       NOW,
     );
-    // -1 は「不明」を意味するので、そのまま表示に流さない
+    // 不明を意味する値は、そのまま表示に流さない
     assert.equal(prompt.hypocenter.depthKm, null);
     assert.equal(prompt.hypocenter.magnitude, null);
     assert.equal(prompt.hypocenter.lat, null);
+    assert.equal(prompt.hypocenter.lon, null);
     assert.equal(prompt.hypocenter.name, '不明');
     assert.equal(prompt.maxIntensity, 30);
+  });
+
+  it('震源不明のセンチネル -200 (仕様書記載) は座標を null にする', () => {
+    // JSON API v2 仕様書: 緯度・経度は「震源情報が存在しない場合は -200」。
+    // これを座標として通すと eewRelevance の距離判定に入り込んでしまうため、
+    // -1 (深さ・マグニチュード) とは別に緯度経度専用の正規化が要る。
+    const quake = parseQuake(
+      {
+        code: 551,
+        id: 'w',
+        earthquake: {
+          hypocenter: { depth: -1, latitude: -200, longitude: -200, magnitude: -1, name: '' },
+          maxScale: 10,
+          time: '2026/08/13 08:56:00',
+        },
+        issue: { type: 'ScalePrompt', time: '2026/08/13 08:58:00' },
+        points: [],
+      },
+      NOW,
+    );
+    assert.equal(quake.hypocenter.lat, null);
+    assert.equal(quake.hypocenter.lon, null);
+    assert.equal(quake.hypocenter.depthKm, null);
+    assert.equal(quake.hypocenter.magnitude, null);
   });
 
   it('未知の震度コードは null にする', () => {
@@ -158,5 +184,23 @@ describe('P2P 556 (緊急地震速報 警報)', () => {
   it('訓練報とキャンセル報を見分ける', () => {
     assert.equal(parseEew({ ...EEW_556, test: true }, NOW).isTraining, true);
     assert.equal(parseEew({ ...EEW_556, cancelled: true }, NOW).isCancel, true);
+  });
+
+  it('震源不明のセンチネル -200 (仕様書記載) は座標を null にする', () => {
+    // 556 の仕様も 551 と同じく「震源情報が存在しない場合は -200」。
+    const eew = parseEew(
+      {
+        ...EEW_556,
+        earthquake: {
+          ...EEW_556.earthquake,
+          hypocenter: { depth: -1, latitude: -200, longitude: -200, magnitude: -1, name: '' },
+        },
+      },
+      NOW,
+    );
+    assert.equal(eew.hypocenter.lat, null);
+    assert.equal(eew.hypocenter.lon, null);
+    assert.equal(eew.hypocenter.depthKm, null);
+    assert.equal(eew.hypocenter.magnitude, null);
   });
 });

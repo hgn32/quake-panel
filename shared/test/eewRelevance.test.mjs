@@ -106,6 +106,54 @@ describe('eewRelevance', () => {
     assert.equal(eewRelevance(eew, null, NOBEOKA, 300), 'none');
   });
 
+  it('regions の pref が府県予報区 (北海道道央) でも道内なら warning', () => {
+    const eew = makeEew({
+      alert: 'warning',
+      regions: [region('北海道道央')],
+      hypocenter: { name: '', lat: SAPPORO.lat, lon: SAPPORO.lon, depthKm: null, magnitude: null },
+    });
+    assert.equal(eewRelevance(eew, '北海道', SAPPORO, 300), 'warning');
+  });
+
+  it('regions の pref が府県予報区 (奄美(群島)) でも鹿児島県なら warning', () => {
+    const KAGOSHIMA = { lat: 31.596, lon: 130.558 };
+    const eew = makeEew({
+      alert: 'warning',
+      regions: [region('奄美(群島)')],
+      hypocenter: { name: '', lat: KAGOSHIMA.lat, lon: KAGOSHIMA.lon, depthKm: null, magnitude: null },
+    });
+    assert.equal(eewRelevance(eew, '鹿児島県', KAGOSHIMA, 300), 'warning');
+  });
+
+  it('regions の pref が府県予報区 (伊豆諸島) でも東京都なら warning', () => {
+    const eew = makeEew({
+      alert: 'warning',
+      regions: [region('伊豆諸島')],
+      hypocenter: { name: '', lat: TOKYO.lat, lon: TOKYO.lon, depthKm: null, magnitude: null },
+    });
+    assert.equal(eewRelevance(eew, '東京都', TOKYO, 300), 'warning');
+  });
+
+  it('regions の pref が府県予報区 (八重山) でも沖縄県なら warning', () => {
+    const OKINAWA = { lat: 26.212, lon: 127.681 };
+    const eew = makeEew({
+      alert: 'warning',
+      regions: [region('八重山')],
+      hypocenter: { name: '', lat: OKINAWA.lat, lon: OKINAWA.lon, depthKm: null, magnitude: null },
+    });
+    assert.equal(eewRelevance(eew, '沖縄県', OKINAWA, 300), 'warning');
+  });
+
+  it('府県予報区の対応付けが他県に誤爆しない (北海道道東・青森県・震央遠方は none)', () => {
+    const AOMORI = { lat: 40.824, lon: 140.74 };
+    const eew = makeEew({
+      alert: 'warning',
+      regions: [region('北海道道東')],
+      hypocenter: { name: '', lat: TAIWAN.lat, lon: TAIWAN.lon, depthKm: null, magnitude: null },
+    });
+    assert.equal(eewRelevance(eew, '青森県', AOMORI, 300), 'none');
+  });
+
   it('haversineKm: 東京-大阪はおよそ 390〜410km', () => {
     const km = haversineKm(TOKYO, OSAKA);
     assert.ok(km > 390 && km < 410, `想定範囲外: ${km}km`);

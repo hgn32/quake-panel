@@ -50,6 +50,28 @@ function candidateNames(name: string): ReadonlySet<string> {
 }
 
 /**
+ * EEW の警報対象地域 (P2P 556 の pref) は「府県予報区」(気象庁 AreaForecastLocalEEW
+ * コード表・56 区) で来る。大半は「熊本」のような県名だが、以下は県名ではなく、
+ * 接尾辞の吸収だけでは利用地の県と結び付かないため、コード表に基づき県へ対応付ける。
+ * 「奄美(群島)」は括弧の表記ゆれに備えて複数の形を持たせておく。
+ */
+const EEW_LOCAL_AREA_PREFECTURE: Record<string, string> = {
+  北海道道央: '北海道',
+  北海道道南: '北海道',
+  北海道道北: '北海道',
+  北海道道東: '北海道',
+  伊豆諸島: '東京都',
+  小笠原: '東京都',
+  '奄美(群島)': '鹿児島県',
+  '奄美（群島）': '鹿児島県',
+  奄美群島: '鹿児島県',
+  沖縄本島: '沖縄県',
+  大東島: '沖縄県',
+  宮古島: '沖縄県',
+  八重山: '沖縄県',
+};
+
+/**
  * 県名の照合。P2P 556 の pref は「宮崎」のように接尾辞なしで来ることがあり、
  * 地図由来の県名は「宮崎県」形式。末尾の都・道・府・県の有無を吸収して比べる。
  * 部分一致は使わない (「京都」と「東京都」の類の誤一致を避ける)。
@@ -67,6 +89,8 @@ export function prefMatches(a: string, b: string): boolean {
  * この EEW の利用地にとってのランク。
  *
  * - 警報かつ警報対象地域 (P2P 556 の regions) に利用地の県が含まれる場合は 'warning'。
+ *   regions の pref は「府県予報区」(気象庁 AreaForecastLocalEEW コード表・56 区) で
+ *   来るため、県名でない区分 (北海道道央/伊豆諸島/奄美(群島) 等) は照合前に県へ寄せる。
  * - 震央が radiusKm 以内なら 'forecast'
  *   (対象地域に利用地の県が無い警報もここへ落ちる。利用地が警報対象外でも
  *   震央が近ければ揺れる可能性はあるので、予報扱いで知らせる)。
@@ -86,7 +110,11 @@ export function eewRelevance(
   if (
     homePrefecture !== null &&
     eew.alert === 'warning' &&
-    eew.regions.some((region) => prefMatches(region.pref, homePrefecture))
+    eew.regions.some((region) => {
+      const trimmed = region.pref.trim();
+      const pref = EEW_LOCAL_AREA_PREFECTURE[trimmed] ?? trimmed;
+      return prefMatches(pref, homePrefecture);
+    })
   ) {
     return 'warning';
   }
