@@ -8,6 +8,7 @@ import {
   type TsunamiArea,
   type TsunamiInfo,
 } from '@quake-panel/shared';
+import type { EewEvent, EewEventKind } from '../eew/coordinator.js';
 import type { Hub } from '../hub.js';
 import { createLogger } from '../logger.js';
 
@@ -68,6 +69,9 @@ interface EewSeriesOptions {
  *   ただし「本物の EEW/津波が現在進行中のときにデモを開始する」ケースだけは、
  *   coordinator の保持期限切れタイミングとデモの配信が競合しうるので、trigger() の時点で
  *   実イベント進行中なら開始そのものを見送ることで競合を無くしている (下記 realEewActive 等)。
+ *
+ * デモも実電文と同様に onEewEvent (webhook 連携) へ流す。id は demo- 接頭辞付きなので
+ * 受信側で区別できる。津波デモは webhook 対象外 (EewEvent は EEW 専用) のため送らない。
  */
 export class DemoRunner {
   private timers: NodeJS.Timeout[] = [];
@@ -76,7 +80,10 @@ export class DemoRunner {
   /** 本物の (demo- でない) 津波予報が現在表示中 (解除されていない) か */
   private realTsunamiActive: boolean;
 
-  constructor(private readonly hub: Hub) {
+  constructor(
+    private readonly hub: Hub,
+    private readonly onEewEvent?: (event: EewEvent) => void,
+  ) {
     this.realEewActive = hub.getEew() !== null;
     const tsunami = hub.getSnapshot().tsunami;
     this.realTsunamiActive = tsunami !== null && !tsunami.cancelled;
@@ -145,6 +152,8 @@ export class DemoRunner {
   }
 
   private runEewSeries(id: string, t0: number, options: EewSeriesOptions): void {
+    // clearAtSec のタイマーで expired イベントを発火するために、最後に配信した状態を控えておく。
+    let lastState: EewState | null = null;
     REPORT_OFFSETS_SEC.forEach((offsetSec, index) => {
       this.after(T0_DELAY_MS + offsetSec * 1000, () => {
         const isFinal = index === REPORT_OFFSETS_SEC.length - 1;
@@ -154,12 +163,24 @@ export class DemoRunner {
         log.info(
           `デモ EEW 第${reportNumber}報 ${upgraded ? '警報' : '予報'}${cancelled ? ' (取消)' : ''} を配信`,
         );
-        this.hub.publishEew(buildEewState(id, t0, offsetSec, reportNumber, isFinal, upgraded, cancelled));
+        const state = buildEewState(id, t0, offsetSec, reportNumber, isFinal, upgraded, cancelled);
+        this.hub.publishEew(state);
+        // coordinator.accept() の cancelRising/isNew 判定 (eew/coordinator.ts) を模した簡易版。
+        const prevOffsetSec = index > 0 ? REPORT_OFFSETS_SEC[index - 1] : undefined;
+        const prevCancelled =
+          options.cancelAtSec !== undefined && prevOffsetSec !== undefined && prevOffsetSec >= options.cancelAtSec;
+        const cancelRising = cancelled && !prevCancelled;
+        const kind: EewEventKind = cancelRising ? 'cancel' : index === 0 ? 'new' : 'update';
+        lastState = state;
+        this.onEewEvent?.({ kind, eew: state });
       });
     });
     this.after(T0_DELAY_MS + options.clearAtSec * 1000, () => {
       log.info(`デモ EEW ${id} の表示を終了します`);
       this.hub.publishEew(null);
+      if (lastState !== null) {
+        this.onEewEvent?.({ kind: 'expired', eew: lastState });
+      }
     });
   }
 

@@ -182,4 +182,56 @@ describe('デモ再生 (DemoRunner)', () => {
 
     assert.equal(events.length, 0);
   });
+
+  it('forecast: onEewEvent が new → update×10 → expired の順で流れ、id は demo- で始まる', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const eewEvents = [];
+    const runner = new DemoRunner(hub, (event) => eewEvents.push(event));
+
+    runner.trigger('forecast');
+    mock.timers.tick(36_000);
+
+    assert.deepEqual(
+      eewEvents.map((e) => e.kind),
+      ['new', ...Array.from({ length: 10 }, () => 'update'), 'expired'],
+    );
+    eewEvents.forEach((e) => {
+      assert.equal(e.eew.id.startsWith('demo-'), true, 'id が demo- で始まっていない');
+    });
+  });
+
+  it('cancel: 初めて取消になった報でだけ cancel が 1 回発火し、以降は update になる', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const eewEvents = [];
+    const runner = new DemoRunner(hub, (event) => eewEvents.push(event));
+
+    runner.trigger('cancel');
+    mock.timers.tick(30_000);
+
+    const cancelEvents = eewEvents.filter((e) => e.kind === 'cancel');
+    assert.equal(cancelEvents.length, 1, 'cancel はちょうど 1 回のはず');
+    // offset 14s = 第8報 (index 7, reportNumber 8) で初めて取消になる
+    assert.equal(cancelEvents[0].eew.reportNumber, 8);
+    assert.equal(cancelEvents[0].eew.isCancel, true);
+
+    const afterCancelIndex = eewEvents.indexOf(cancelEvents[0]);
+    const afterCancel = eewEvents.slice(afterCancelIndex + 1).filter((e) => e.kind !== 'expired');
+    afterCancel.forEach((e) => {
+      assert.equal(e.kind, 'update', 'cancel より後の続報は update のはず');
+    });
+  });
+
+  it('コールバック未指定でも例外なく動く', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const events = attachRecorder(hub);
+    const runner = new DemoRunner(hub);
+
+    runner.trigger('forecast');
+    assert.doesNotThrow(() => mock.timers.tick(36_000));
+
+    assert.equal(events.filter((e) => e.type === 'eew').length, 12);
+  });
 });

@@ -42,7 +42,8 @@ function main(): Promise<void> {
   // 実際の地震発生を待たずに動作確認するためのデモ再生。発火は設定画面のボタンのみ
   // (専用の HTTP エンドポイントは作らない)。Hub の通常配信経路にそのまま乗せるので、
   // 詳しい理由は demo/runner.ts のコメントを参照。
-  const demo = new DemoRunner(hub);
+  // デモの EEW も実電文と同様に webhook へ流す (id が demo- 接頭辞なので受信側で区別できる)。
+  const demo = new DemoRunner(hub, (event) => webhookNotifier?.handle(event));
 
   const httpServer = createHttpServer(config, hub, frames);
   const wsServer = new ClientWebSocketServer(httpServer, config, hub, demo);
