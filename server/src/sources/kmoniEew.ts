@@ -74,11 +74,20 @@ const parseEitherTime = (value: string | undefined): Date | null => {
 /**
  * 平常時のレスポンスは全フィールドが空文字で `alertflg` キー自体が無い
  * (2026-08-13 実測、docs/kmoni-endpoints.md)。したがって
- * 「alertflg が予報/警報のいずれかであること」を発表判定に使う。
+ * 「alertflg が予報/警報であること、または is_cancel が立っていること」を
+ * 発表判定に使う。
+ *
+ * kmoni の EEW JSON は NIED 非公式で、キャンセル報の実物は観測例が無い
+ * (コミュニティの解析サイトも「is_cancel は受信したことがない」と明記している)。
+ * alertflg が維持されたまま来る形・空になる形・「キャンセル」等の値になる形の
+ * いずれも否定できないため、is_cancel が立っていれば alertflg の値にかかわらず
+ * 受け入れる (実運用のキャンセルは P2P 556 の cancelled でも届くので、これは
+ * kmoni 単独時の保険)。
  */
 export function parseKmoniEew(raw: KmoniEewRaw): KmoniEewReport | null {
   const flag = raw.alertflg?.trim();
-  if (flag !== '予報' && flag !== '警報') return null;
+  const cancelled = truthy(raw.is_cancel);
+  if (flag !== '予報' && flag !== '警報' && !cancelled) return null;
 
   const id = raw.report_id?.trim();
   if (!id) return null;
@@ -87,7 +96,7 @@ export function parseKmoniEew(raw: KmoniEewRaw): KmoniEewReport | null {
     id,
     reportNumber: numberOrNull(raw.report_num) ?? 0,
     alert: flag === '警報' ? 'warning' : 'forecast',
-    isCancel: truthy(raw.is_cancel),
+    isCancel: cancelled,
     isFinal: truthy(raw.is_final),
     isTraining: truthy(raw.is_training),
     hypocenter: {

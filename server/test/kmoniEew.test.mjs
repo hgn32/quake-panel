@@ -136,4 +136,78 @@ describe('kmoni EEW JSON の解釈', () => {
     assert.equal(report.originTime.toISOString(), '2026-07-29T13:19:36.000Z');
     assert.equal(report.announcedAt.toISOString(), '2026-07-29T13:19:44.000Z');
   });
+
+  /** 2026-08-17 06:37 の福岡県福岡地方 M3.6 の予報について、実際に返ってきたレスポンス (実測、一字も変えていない) */
+  const REAL_FUKUOKA_FORECAST = {
+    result: { status: 'success', message: '', is_auth: true },
+    report_time: '2026/08/17 06:37:26',
+    region_code: '',
+    request_time: '202608170637%s',
+    region_name: '福岡県福岡地方',
+    longitude: '130.2',
+    is_cancel: false,
+    depth: '10km',
+    calcintensity: '3',
+    is_final: false,
+    is_training: false,
+    latitude: '33.5',
+    origin_time: '20260817063719',
+    security: {
+      realm: '/kyoshin_monitor/static/jsondata/eew_est/',
+      hash: 'b61e4d95a8c42e004665825c098a6de4',
+    },
+    magunitude: '3.6',
+    report_num: '1',
+    report_id: '20260817063722',
+    alertflg: '予報',
+  };
+
+  it('発表時の実レスポンス (2026-08-17 福岡県福岡地方、実測) をそのまま読める', () => {
+    const report = parseKmoniEew(REAL_FUKUOKA_FORECAST);
+    assert.ok(report);
+    assert.equal(report.alert, 'forecast');
+    assert.equal(report.id, '20260817063722');
+    assert.equal(report.reportNumber, 1);
+    assert.equal(report.maxIntensity, 30);
+    assert.equal(report.hypocenter.name, '福岡県福岡地方');
+    assert.equal(report.hypocenter.lat, 33.5);
+    assert.equal(report.hypocenter.lon, 130.2);
+    assert.equal(report.hypocenter.depthKm, 10);
+    assert.equal(report.hypocenter.magnitude, 3.6);
+    assert.equal(report.isCancel, false);
+    assert.equal(report.isFinal, false);
+    assert.equal(report.isTraining, false);
+    assert.equal(report.originTime.toISOString(), '2026-08-16T21:37:19.000Z');
+  });
+
+  describe('キャンセル報 (実物の観測例が無いため、あり得る形をすべて受け入れる)', () => {
+    it('alertflg が維持されたまま is_cancel が立つ形', () => {
+      const cancelled = parseKmoniEew({ ...REAL_KUMAMOTO_WARNING, is_cancel: true });
+      assert.ok(cancelled);
+      assert.equal(cancelled.isCancel, true);
+      assert.equal(cancelled.alert, 'warning');
+    });
+
+    it('alertflg が無く (undefined) is_cancel だけが立つ形', () => {
+      const { alertflg, ...withoutFlag } = REAL_KUMAMOTO_WARNING;
+      const cancelled = parseKmoniEew({ ...withoutFlag, is_cancel: true });
+      assert.ok(cancelled);
+      assert.equal(cancelled.isCancel, true);
+    });
+
+    it('alertflg が「キャンセル」という値になり is_cancel が文字列 "true" で来る形', () => {
+      const cancelled = parseKmoniEew({
+        ...REAL_KUMAMOTO_WARNING,
+        alertflg: 'キャンセル',
+        is_cancel: 'true',
+      });
+      assert.ok(cancelled);
+      assert.equal(cancelled.isCancel, true);
+    });
+
+    it('平常時 (alertflg 無し・is_cancel が空文字/false) は発表として扱わない', () => {
+      assert.equal(parseKmoniEew(QUIET), null);
+      assert.equal(parseKmoniEew({ ...QUIET, is_cancel: false }), null);
+    });
+  });
 });

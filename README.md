@@ -133,8 +133,23 @@ npm test               # ビルドしてから単体テスト
 npm run typecheck
 ```
 
-上流を叩かずに EEW 表示を確認したいときは、kmoni をモックした HTTP サーバーを
-立てて `KMONI_BASE_URL` をそちらへ向ければよい (P2P 側は接続したままでよい)。
+### 実動作の確認 (実電文リプレイ)
+
+EEW・津波の音と画面明滅は、実際の発生を待たなくても
+**`scripts/replay-upstream.mjs`** で確認できる。上流 (kmoni + P2P) を localhost で
+模擬し、実物と同じ形の電文を現在時刻へシフトして再生する:
+
+```bash
+node scripts/replay-upstream.mjs --scenario warning   # 予報→警報へ格上げ (P2P 556 併送)
+# 別ターミナルで
+KMONI_BASE_URL=http://127.0.0.1:8090 \
+P2P_WS_URL=ws://127.0.0.1:8090/ \
+P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
+```
+
+シナリオは `forecast` (既定) / `warning` / `cancel` (即時停止の確認) / `tsunami`
+(発表→解除)。地図画像は利用条件 (§2) により実物を同梱しないため透過画像になるが、
+鳴動・明滅・パネル・両系統の統合はすべて実物どおりの電文で動く。
 
 ---
 
