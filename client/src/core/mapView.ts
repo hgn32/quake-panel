@@ -487,11 +487,14 @@ export class MapView {
     const frame = this.frame;
     if (!frame) return;
 
-    // 予想震度と予測円は面で描かれているので、画像のまま地図に重ねる
+    // 予想震度と予測円は面で描かれているので、画像のまま地図に重ねる。
+    // 補間なしで拡大すると 1px が倍率ぶんの硬いブロックになり、地震時にだけ
+    // 巨大な四角が並んで見える (実地震 2026-08-17 で確認)。表示時の補間で
+    // 滑らかにする (色から値を読む処理ではなく、見せ方の調整のみ §2(2))。
     ctx.save();
     ctx.translate(this.transform.offsetX, this.transform.offsetY);
     ctx.scale(this.transform.scale, this.transform.scale);
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
     if (frame.estShindo) {
       ctx.globalAlpha = 0.75;
       this.drawLayer(ctx, frame.estShindo);
@@ -506,7 +509,8 @@ export class MapView {
       ctx.save();
       ctx.translate(this.transform.offsetX, this.transform.offsetY);
       ctx.scale(this.transform.scale, this.transform.scale);
-      ctx.imageSmoothingEnabled = false;
+      // 予測円も同様に補間し、ギザギザの太線ではなく滑らかな線として見せる
+      ctx.imageSmoothingEnabled = true;
       this.drawLayer(ctx, frame.psWave);
       ctx.restore();
     }
