@@ -1,4 +1,4 @@
-import { formatJstClock, type TsunamiArea, type TsunamiInfo } from '@quake-panel/shared';
+import { formatJstClock, isDemoEventId, type TsunamiArea, type TsunamiInfo } from '@quake-panel/shared';
 import { h, replaceChildren } from './dom.js';
 
 const GRADE_LABEL: Record<string, string> = {
@@ -42,6 +42,8 @@ export class TsunamiPanel {
         'div',
         { class: 'tsunami__head' },
         h('h2', { class: 'panel__title', text: top ? GRADE_LABEL[top.grade] ?? '津波予報' : '津波予報' }),
+        // デモ再生の誤認防止 (バナーと合わせて二重に示す)。既存の tag class をそのまま流用する。
+        isDemoEventId(tsunami.id) ? h('span', { class: 'tag', text: 'デモ' }) : null,
         h('span', {
           class: 'tsunami__issued',
           text: tsunami.issuedAt ? `${formatJstClock(tsunami.issuedAt)} 発表` : '',

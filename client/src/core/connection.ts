@@ -1,8 +1,9 @@
 import {
   ENDPOINTS,
   isServerEvent,
-  type JsonValue,
   type ClientMessage,
+  type DemoScenario,
+  type JsonValue,
   type ServerEvent,
 } from '@quake-panel/shared';
 import { resolveWsUrl } from './urls.js';
@@ -58,6 +59,11 @@ export class ServerConnection {
   /** 取りこぼしを疑ったときに現況一括を要求する */
   requestResync(): void {
     this.send({ type: 'resync' });
+  }
+
+  /** 設定画面のデモ再生ボタンから、実電文と同形のデモを全端末へ流させる */
+  sendDemo(scenario: DemoScenario): void {
+    this.send({ type: 'demo', scenario });
   }
 
   private setState(state: ConnectionState): void {

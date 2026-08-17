@@ -1,22 +1,15 @@
 #!/bin/bash
 # リリース前のビルド確認用。テスト → docker build → 起動スモークテストの順に確認する。
-# 実イメージはリポジトリルートの Dockerfile 1 本だけで管理する (ここには置かない)。
+# 実イメージはこのディレクトリの Dockerfile 1 本だけで管理する。
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
 IMAGE=quake-panel
 SMOKE_NAME=quake-panel-buildtest
 
-# プロキシは .env から読む。社内/自宅の判定と書き込みは
-# .devcontainer/initializeCommand.sh が起動のたびに済ませているので、ここでは決め打ちしない。
-# .env がまだ更新されていない場合に備え、呼び出し側の環境変数を優先する。
-read_env() {
-    [ -f "${ROOT_DIR}/.env" ] || return 0
-    grep -E "^$1=" "${ROOT_DIR}/.env" | tail -n 1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'
-}
-PROXY_URL=${PROXY_URL:-$(read_env PROXY_URL)}
-PROXY_NO_PROXY=${PROXY_NO_PROXY:-$(read_env PROXY_NO_PROXY)}
+# プロキシ経由でビルドするときは、呼び出し側が環境変数で指定する。
+#   PROXY_URL=http://proxy.example.com:8080 PROXY_NO_PROXY=localhost release/build_image.sh
 if [ -z "${PROXY_URL}" ]; then
-    echo "ℹ️ PROXY_URL が空のためプロキシ無しでビルドします (社内なら .env の PROXY_URL を確認)"
+    echo "ℹ️ PROXY_URL が空のためプロキシ無しでビルドします"
 fi
 
 # テスト (時間のかかる docker build の前に実行して早く落とす)。
@@ -36,7 +29,8 @@ if [ $? -ne 0 ]; then
 fi
 echo "🎉Successfully test"
 
-# コミットハッシュはイメージのタグとして残す (Dockerfile 側に受け口を作らずに済む)。
+# コミットハッシュはイメージのタグとして残しつつ、設定画面にも表示できるよう
+# build-arg で Dockerfile 側にも渡す (イメージ内には .git が無いため git コマンドは使えない)。
 COMMIT_HASH=$(git -C "${ROOT_DIR}" show --format='%H' --no-patch 2>/dev/null | cut -c 1-7)
 TAG_ARGS=(-t "${IMAGE}:latest")
 if [ -n "${COMMIT_HASH}" ]; then
@@ -45,10 +39,11 @@ fi
 
 docker build "${TAG_ARGS[@]}" \
         --no-cache \
-        -f "${ROOT_DIR}/Dockerfile" \
+        -f "${SCRIPT_DIR}/Dockerfile" \
         --build-arg HTTP_PROXY="${PROXY_URL}" \
         --build-arg HTTPS_PROXY="${PROXY_URL}" \
         --build-arg NO_PROXY="${PROXY_NO_PROXY}" \
+        --build-arg COMMIT_HASH="${COMMIT_HASH}" \
         "${ROOT_DIR}"
 if [ $? -ne 0 ]; then
     echo "🐞Failed build"

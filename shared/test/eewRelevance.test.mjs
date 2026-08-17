@@ -3,8 +3,8 @@ import { describe, it } from 'node:test';
 
 import { eewRelevance, haversineKm, prefMatches } from '../dist/index.js';
 
-// 利用地: 延岡 (宮崎県)
-const NOBEOKA = { lat: 32.582, lon: 131.665 };
+// 利用地の例: 宮崎県沿岸 (日向灘)
+const HOME_MIYAZAKI = { lat: 32.582, lon: 131.665 };
 const SAPPORO = { lat: 43.06, lon: 141.35 };
 const HYUGANADA = { lat: 32.2, lon: 132.0 };
 const TAIWAN = { lat: 23.5, lon: 121.5 };
@@ -46,7 +46,7 @@ describe('eewRelevance', () => {
       regions: [region('宮崎')],
       hypocenter: { name: '', lat: HYUGANADA.lat, lon: HYUGANADA.lon, depthKm: null, magnitude: null },
     });
-    assert.equal(eewRelevance(eew, '宮崎県', NOBEOKA, 300), 'warning');
+    assert.equal(eewRelevance(eew, '宮崎県', HOME_MIYAZAKI, 300), 'warning');
   });
 
   it('regions の pref が県名形式 (接尾辞あり) でも一致する', () => {
@@ -55,7 +55,7 @@ describe('eewRelevance', () => {
       regions: [region('宮崎県')],
       hypocenter: { name: '', lat: HYUGANADA.lat, lon: HYUGANADA.lon, depthKm: null, magnitude: null },
     });
-    assert.equal(eewRelevance(eew, '宮崎県', NOBEOKA, 300), 'warning');
+    assert.equal(eewRelevance(eew, '宮崎県', HOME_MIYAZAKI, 300), 'warning');
   });
 
   it('警報だが regions は北海道のみ・震央も遠ければ none', () => {
@@ -64,7 +64,7 @@ describe('eewRelevance', () => {
       regions: [region('北海道')],
       hypocenter: { name: '', lat: SAPPORO.lat, lon: SAPPORO.lon, depthKm: null, magnitude: null },
     });
-    assert.equal(eewRelevance(eew, '宮崎県', NOBEOKA, 300), 'none');
+    assert.equal(eewRelevance(eew, '宮崎県', HOME_MIYAZAKI, 300), 'none');
   });
 
   it('警報・regions は北海道のみでも、震央が近ければ forecast (対象県外でも近ければ知らせる)', () => {
@@ -73,7 +73,7 @@ describe('eewRelevance', () => {
       regions: [region('北海道')],
       hypocenter: { name: '', lat: HYUGANADA.lat, lon: HYUGANADA.lon, depthKm: null, magnitude: null },
     });
-    assert.equal(eewRelevance(eew, '宮崎県', NOBEOKA, 300), 'forecast');
+    assert.equal(eewRelevance(eew, '宮崎県', HOME_MIYAZAKI, 300), 'forecast');
   });
 
   it('予報 (alert=forecast) は regions を見ず、距離だけで判定する', () => {
@@ -82,19 +82,19 @@ describe('eewRelevance', () => {
       regions: [],
       hypocenter: { name: '', lat: HYUGANADA.lat, lon: HYUGANADA.lon, depthKm: null, magnitude: null },
     });
-    assert.equal(eewRelevance(near, '宮崎県', NOBEOKA, 300), 'forecast');
+    assert.equal(eewRelevance(near, '宮崎県', HOME_MIYAZAKI, 300), 'forecast');
 
     const far = makeEew({
       alert: 'forecast',
       regions: [],
       hypocenter: { name: '', lat: TAIWAN.lat, lon: TAIWAN.lon, depthKm: null, magnitude: null },
     });
-    assert.equal(eewRelevance(far, '宮崎県', NOBEOKA, 500), 'none');
+    assert.equal(eewRelevance(far, '宮崎県', HOME_MIYAZAKI, 500), 'none');
   });
 
   it('震央不明 (lat/lon が null) なら forecast (判定できないものは鳴らす側に倒す)', () => {
     const eew = makeEew({ alert: 'forecast', regions: [] });
-    assert.equal(eewRelevance(eew, '宮崎県', NOBEOKA, 300), 'forecast');
+    assert.equal(eewRelevance(eew, '宮崎県', HOME_MIYAZAKI, 300), 'forecast');
   });
 
   it('homePrefecture が null なら県照合をスキップする (震央が遠ければ none)', () => {
@@ -103,7 +103,7 @@ describe('eewRelevance', () => {
       regions: [region('宮崎')],
       hypocenter: { name: '', lat: SAPPORO.lat, lon: SAPPORO.lon, depthKm: null, magnitude: null },
     });
-    assert.equal(eewRelevance(eew, null, NOBEOKA, 300), 'none');
+    assert.equal(eewRelevance(eew, null, HOME_MIYAZAKI, 300), 'none');
   });
 
   it('regions の pref が府県予報区 (北海道道央) でも道内なら warning', () => {

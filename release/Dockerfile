@@ -13,7 +13,10 @@ RUN npm ci
 COPY shared/ shared/
 COPY server/ server/
 COPY client/ client/
-RUN npm run build
+# .git を含めないイメージでは client/vite.config.ts が git からハッシュを取れないため、
+# build-arg で受け取ったコミットハッシュをビルド時だけ環境変数として渡す。
+ARG COMMIT_HASH
+RUN COMMIT_HASH=${COMMIT_HASH} npm run build
 
 # 実行に要らない依存を落とす
 RUN npm prune --omit=dev

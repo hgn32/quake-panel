@@ -35,8 +35,6 @@ export interface Config {
     eewIntervalMs: number;
     /** 基準時刻 (latest.json) の再同期間隔 (ms) */
     clockSyncIntervalMs: number;
-    /** kmoni の表示時刻は現在時刻より数秒遅れる。取得を何秒遅らせるか。 */
-    frameLagSeconds: number;
     requestTimeoutMs: number;
     /** 連続失敗が何回続いたら劣化モードに落とすか */
     degradeAfterFailures: number;
@@ -57,6 +55,12 @@ export interface Config {
   quakeHistorySize: number;
   /** EEW を「表示終了」とみなすまでの時間 (ms) */
   eewRetentionMs: number;
+  /** EEW イベントを外部システムへ通知する webhook。URL 未設定なら無効。 */
+  eewWebhook: {
+    /** POST 先 URL（複数可） */
+    urls: string[];
+    requestTimeoutMs: number;
+  };
   logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
@@ -74,7 +78,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       activeFrameIntervalMs: sec(env['KMONI_ACTIVE_FRAME_INTERVAL_SEC'], 1) * 1000,
       eewIntervalMs: num(env['KMONI_EEW_INTERVAL_MS'], 1000),
       clockSyncIntervalMs: num(env['KMONI_CLOCK_SYNC_INTERVAL_MS'], 60_000),
-      frameLagSeconds: num(env['KMONI_FRAME_LAG_SECONDS'], 2),
       requestTimeoutMs: num(env['KMONI_REQUEST_TIMEOUT_MS'], 4000),
       degradeAfterFailures: num(env['KMONI_DEGRADE_AFTER_FAILURES'], 5),
       frameCacheSize: num(env['KMONI_FRAME_CACHE_SIZE'], 30),
@@ -88,6 +91,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     wsHeartbeatMs: num(env['WS_HEARTBEAT_MS'], 30_000),
     quakeHistorySize: num(env['QUAKE_HISTORY_SIZE'], 12),
     eewRetentionMs: num(env['EEW_RETENTION_MS'], 180_000),
+    eewWebhook: {
+      urls: str(env['EEW_WEBHOOK_URL'], '')
+        .split(',')
+        .map((u) => u.trim())
+        .filter((u) => u !== ''),
+      requestTimeoutMs: num(env['EEW_WEBHOOK_TIMEOUT_MS'], 5000),
+    },
     logLevel: (str(env['LOG_LEVEL'], 'info') as Config['logLevel']),
   };
 }

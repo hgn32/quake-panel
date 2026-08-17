@@ -10,5 +10,4 @@ deploy
 scripts
 *.log
 .vscode
-.git
-aws
+release

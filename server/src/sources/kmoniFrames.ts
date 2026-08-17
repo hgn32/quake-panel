@@ -83,7 +83,7 @@ export class KmoniFrameWorker {
     this.eewActive = active;
   }
 
-  /** サーバーが既定で取りに行く指標 (アドオンの設定) */
+  /** サーバーが既定で取りに行く指標 (KMONI_LAYER) */
   get defaultLayer(): KmoniLayer {
     return this.config.kmoni.layer;
   }

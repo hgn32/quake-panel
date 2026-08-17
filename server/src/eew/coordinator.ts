@@ -12,11 +12,21 @@ const CANCEL_RETENTION_MS = 20_000;
 /** 発震時刻がこの範囲で一致すれば、ID 表記が違っても同じ地震とみなす */
 const SAME_EVENT_TOLERANCE_MS = 3000;
 
+/** EEW の状態が動いた種別。'expired' は続報が途切れて表示を終了したとき。 */
+export type EewEventKind = 'new' | 'update' | 'cancel' | 'expired';
+
+export interface EewEvent {
+  kind: EewEventKind;
+  eew: EewState;
+}
+
 export interface EewCoordinatorDeps {
   config: Config;
   hub: Hub;
   /** EEW 発表中だけ予測円・予想震度レイヤを取りに行かせる */
   onActiveChange: (active: boolean) => void;
+  /** EEW の状態が動くたびに呼ばれる (外部 webhook 通知など)。未設定なら何もしない。 */
+  onEewEvent?: (event: EewEvent) => void;
 }
 
 /**
@@ -66,13 +76,14 @@ export class EewCoordinator {
     if (!merged) return;
 
     const isNew = !this.current || !isSameEvent(this.current, merged);
+    const cancelRising = merged.isCancel && !this.current?.isCancel;
     if (isNew) {
       log.info(
         `EEW ${merged.alert} ${merged.hypocenter.name} M${merged.hypocenter.magnitude ?? '?'} ` +
           `最大震度${merged.maxIntensity ?? '?'} (${merged.source})`,
       );
     }
-    if (merged.isCancel && !this.current?.isCancel) {
+    if (cancelRising) {
       log.info(`EEW cancelled: ${merged.id}`);
     }
 
@@ -80,6 +91,8 @@ export class EewCoordinator {
     this.lastUpdateAt = Date.now();
     this.deps.hub.publishEew(merged);
     this.deps.onActiveChange(true);
+    const kind: EewEventKind = cancelRising ? 'cancel' : isNew ? 'new' : 'update';
+    this.deps.onEewEvent?.({ kind, eew: merged });
   }
 
   /**
@@ -99,9 +112,11 @@ export class EewCoordinator {
     const limit = this.current.isCancel ? CANCEL_RETENTION_MS : this.deps.config.eewRetentionMs;
     if (age < limit) return;
     log.debug(`EEW ${this.current.id} expired after ${Math.round(age / 1000)}s`);
+    const expired = this.current;
     this.current = null;
     this.deps.hub.publishEew(null);
     this.deps.onActiveChange(false);
+    this.deps.onEewEvent?.({ kind: 'expired', eew: expired });
   }
 }
 

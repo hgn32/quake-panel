@@ -36,10 +36,30 @@ export type ServerEvent =
   /** アプリケーション層のハートビート応答 */
   | { type: 'pong'; time: string };
 
+/**
+ * 本番パネルの設定画面から発火できるデモ再生のシナリオ。
+ * HTTP エンドポイントは作らず、この WebSocket メッセージだけが入口になる。
+ */
+export type DemoScenario = 'forecast' | 'warning' | 'cancel' | 'tsunami';
+
 export type ClientMessage =
   | { type: 'ping'; time?: string }
   /** 取りこぼし時などに現況一括を要求する */
-  | { type: 'resync' };
+  | { type: 'resync' }
+  /** デモ再生の発火。実電文と同形のイベントを通常配信経路で全端末に流す。 */
+  | { type: 'demo'; scenario: DemoScenario };
+
+/** デモ再生の id に必ず付く接頭辞。実電文の id には出現しない前提。 */
+const DEMO_ID_PREFIX = 'demo-';
+
+/**
+ * この id がデモ再生由来かどうか。
+ * サーバー (demo/runner.ts) とクライアント (誤認防止バナー・パネルの「デモ」表記) の
+ * 両方から参照するので、判定ロジックをここに一本化する。
+ */
+export function isDemoEventId(id: string): boolean {
+  return id.startsWith(DEMO_ID_PREFIX);
+}
 
 /**
  * サーバーからの通知として扱ってよいか。

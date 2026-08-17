@@ -3,6 +3,7 @@ import {
   intensityColor,
   intensityLabel,
   intensityTextColor,
+  isDemoEventId,
   type EewRelevance,
   type EewState,
 } from '@quake-panel/shared';
@@ -69,6 +70,8 @@ export class EewPanel {
     badge.style.setProperty('--intensity-text', intensityTextColor(eew.maxIntensity));
 
     const tags = [
+      // デモ再生は誤認防止のため一番目立つ位置に付ける (バナーと合わせて二重に示す)
+      isDemoEventId(eew.id) ? 'デモ' : null,
       eew.isCancel ? 'キャンセル報' : eew.alert === 'warning' ? '警報' : '予報',
       eew.isTraining ? '訓練' : null,
       eew.isAssumption ? '仮定震源' : null,

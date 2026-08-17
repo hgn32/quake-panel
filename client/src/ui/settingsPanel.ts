@@ -6,6 +6,7 @@ import {
   MIN_INTENSITY_CHOICES,
   TSUNAMI_ALERT_MIN_CHOICES,
   geolocationErrorMessage,
+  type DemoScenario,
   type HomeLocation,
   type KmoniLayer,
 } from '@quake-panel/shared';
@@ -23,6 +24,14 @@ const PREFECTURES = [
   '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
 ];
 
+/** デモ再生のシナリオとボタンの表記 */
+const DEMO_SCENARIOS: ReadonlyArray<{ value: DemoScenario; label: string }> = [
+  { value: 'forecast', label: '予報' },
+  { value: 'warning', label: '警報へ格上げ' },
+  { value: 'cancel', label: 'キャンセル報' },
+  { value: 'tsunami', label: '津波予報' },
+];
+
 export interface SettingsPanelDeps {
   modal: HTMLElement;
   form: HTMLElement;
@@ -35,6 +44,8 @@ export interface SettingsPanelDeps {
   onChange: (patch: Partial<Settings>) => void;
   /** 音と画面明滅の両方を出すテスト */
   onTest: () => void;
+  /** デモ再生の発火。実行が確定した後に呼ばれる */
+  onDemo: (scenario: DemoScenario) => void;
   /** 地図をクリックして利用地を選ぶモードに入る */
   onPickHome: () => void;
   /** ブラウザの位置情報が使えるか (HTTPS でないと使えないのでボタンごと隠す) */
@@ -56,6 +67,8 @@ export interface SettingsPanelDeps {
  */
 export class SettingsPanel {
   private snapshot: Settings | null = null;
+  /** 「実行する/やめる」の確認待ちになっているシナリオ。null なら通常表示。 */
+  private pendingDemo: DemoScenario | null = null;
 
   constructor(private readonly deps: SettingsPanelDeps) {
     deps.openButton.addEventListener('click', () => this.open());
@@ -71,6 +84,7 @@ export class SettingsPanel {
 
   open(): void {
     this.snapshot = { ...this.deps.getSettings() };
+    this.pendingDemo = null;
     this.render();
     this.deps.modal.hidden = false;
   }
@@ -78,6 +92,7 @@ export class SettingsPanel {
   /** 変更はすでに効いているので、閉じるだけ */
   private save(): void {
     this.snapshot = null;
+    this.pendingDemo = null;
     this.deps.modal.hidden = true;
   }
 
@@ -85,12 +100,14 @@ export class SettingsPanel {
   private cancel(): void {
     if (this.snapshot) this.deps.onChange(this.snapshot);
     this.snapshot = null;
+    this.pendingDemo = null;
     this.deps.modal.hidden = true;
   }
 
   /** 明滅を見せるためにいったん閉じる (取消扱いにはしない) */
   close(): void {
     this.snapshot = null;
+    this.pendingDemo = null;
     this.deps.modal.hidden = true;
   }
 
@@ -232,8 +249,74 @@ export class SettingsPanel {
             this.deps.onTest();
           }),
         ),
+        this.demoRow(),
+      ),
+      // 常時表示の画面には出さず、問い合わせを受けたときにどのビルドか
+      // 特定できるよう、設定画面の最下部にだけ小さく出す。
+      this.versionFooter(),
+    );
+  }
+
+  /**
+   * デモ再生。
+   *
+   * ボタンを押しても即発火はさせず、いったん行内を警告表示に切り替えて
+   * 「実行する」を押させてから初めて送信する (window.confirm は使わない)。
+   */
+  private demoRow(): HTMLElement {
+    if (this.pendingDemo) {
+      const scenario = this.pendingDemo;
+      const label = DEMO_SCENARIOS.find((s) => s.value === scenario)?.label ?? scenario;
+      return this.row(
+        'デモ再生',
+        null,
+        h(
+          'div',
+          { class: 'settings__stack' },
+          h('p', {
+            class: 'settings__warning',
+            text:
+              `「${label}」のデモを実行します。接続中のすべての端末で、本物と同じ音と画面明滅が` +
+              '鳴ります。実行しますか?',
+          }),
+          h(
+            'div',
+            { class: 'settings__options' },
+            this.button('実行する', () => {
+              this.pendingDemo = null;
+              // 明滅は画面全体に出るので、確認できるよう設定画面を閉じる (テストボタンと同じ流儀)
+              this.close();
+              this.deps.onDemo(scenario);
+            }),
+            this.button('やめる', () => {
+              this.pendingDemo = null;
+              this.render();
+            }),
+          ),
+        ),
+      );
+    }
+
+    return this.row(
+      'デモ再生',
+      '実際の電文と同じ形のデモを全端末に流します。実発生時はデモを即中止して本物を優先します。',
+      h(
+        'div',
+        { class: 'settings__options' },
+        ...DEMO_SCENARIOS.map((scenario) =>
+          this.button(scenario.label, () => {
+            this.pendingDemo = scenario.value;
+            this.render();
+          }),
+        ),
       ),
     );
+  }
+
+  /** ビルド時のコミットハッシュ。vite.config.ts の define で埋め込まれる。 */
+  private versionFooter(): HTMLElement {
+    const label = __COMMIT_HASH__ ? `バージョン: ${__COMMIT_HASH__}` : 'バージョン: 開発版';
+    return h('p', { class: 'settings__version', text: label });
   }
 
   /** 章。見出しと、必要なら章全体の説明を付ける。 */

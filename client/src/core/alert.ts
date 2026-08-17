@@ -12,7 +12,7 @@ export type FlashLevel = 'none' | 'forecast' | 'warning' | 'tsunami';
  * 「モニターを注視していなくても気づける」ための層 (§1)。
  *
  * 明滅は CSS アニメーションに任せる。requestAnimationFrame で色を書き換えると
- * 描画スレッドを常時起こすことになり、Pi4 では地図描画と食い合う (§4)。
+ * 描画スレッドを常時起こすことになり、非力な表示端末では地図描画と食い合う (§4)。
  */
 export class AlertPresenter {
   readonly audio = new AlertAudio();

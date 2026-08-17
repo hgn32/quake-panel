@@ -11,6 +11,9 @@
     <!-- 画面明滅。requestAnimationFrame ではなく CSS アニメーションで行う (§4)。 -->
     <div id="flash" class="flash" aria-hidden="true"></div>
 
+    <!-- デモ再生中の誤認防止。demo- の EEW/津波を受けている間だけ表示する (§ デモ再生)。 -->
+    <div id="demo-banner" class="demo-banner" hidden>デモ再生中 — 実際の地震ではありません</div>
+
     <div id="app" class="app">
       <header class="topbar">
         <div class="topbar__clock">

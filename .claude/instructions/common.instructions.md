@@ -48,15 +48,14 @@
 
 ### 4-1. ビルド
 
-- **backend**: `cd /workspaces/backend && npm run build`
-- **frontend**: `cd /workspaces/frontend && npm run build`
+- ルートで `cd /workspaces && npm run build`（shared → client → server の順にビルドされる）
+- 型チェックのみなら `npm run typecheck`
 
 ### 4-2. テスト
 
-- **frontend**: `cd /workspaces/frontend && npm test`（vitest + jsdom + Testing Library）
-- **backend**: `cd /workspaces/backend && npm test`（vitest + Node環境）
-  - DBやAzureに接続する処理はテスト対象にしない。ロジックは副作用のない純関数に切り出してテストすること。
-  - テストは `backend/src/__tests__/` 配下に置く（配布物に含めないため tsconfig の exclude で除外済み）。
+- ルートで `cd /workspaces && npm test`（`node --test`。ビルドを含むため型エラーもここで落ちる）
+  - 上流 (kmoni / P2P地震情報) に接続する処理はテスト対象にしない。ロジックは副作用のない純関数に切り出してテストすること。
+  - テストは各ワークスペースの `test/` 配下（`shared/test/` `server/test/`）に置く（配布物に含めない）。
 
 ### 4-3. 実行時のルール
 
@@ -68,6 +67,6 @@
 ## 5. 技術スタック & コーディング規約
 
 - 言語: TypeScript
-- フレームワーク: React
-- 命名規則: 変数・関数は camelCase, コンポーネントは PascalCase
+- フレームワーク: なし（クライアントは素の TypeScript + Canvas、サーバーは Node.js。描画コア `client/src/core/` は UI 非依存を保つ）
+- 命名規則: 変数・関数は camelCase, クラス・型は PascalCase
 - **ファイルを実装する前に、必ず `.claude/instructions/` 配下の該当言語・フレームワークの instructions ファイルを読み、全ルールを遵守すること。（例: TypeScript → `typescript.instructions.md`）**

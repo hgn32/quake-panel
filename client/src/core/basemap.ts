@@ -62,7 +62,7 @@ export class Basemap {
    * 配信画像のピクセル座標にある都道府県名。無ければ null (海上など)。
    *
    * 利用地の都道府県を座標から引くために使う。地名を設定させなくても
-   * 「自宅のある県」の観測点を履歴で前に出せる。
+   * 「利用地のある県」の観測点を履歴で前に出せる。
    */
   prefectureAtPixel(x: number, y: number): string | null {
     if (!this.data) return null;
@@ -75,7 +75,7 @@ export class Basemap {
 
   /**
    * 変換後の背景をオフスクリーンに焼いて使い回す。
-   * 毎秒の再描画で 1 万点の多角形を引き直すのは Pi4 には重い。
+   * 毎秒の再描画で 1 万点の多角形を引き直すのは非力な端末には重い。
    */
   draw(
     ctx: CanvasRenderingContext2D,

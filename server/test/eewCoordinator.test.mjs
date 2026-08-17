@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isSameEvent, kmoniToState, mergeStates } from '../dist/eew/coordinator.js';
+import { EewCoordinator, isSameEvent, kmoniToState, mergeStates } from '../dist/eew/coordinator.js';
+import { loadConfig } from '../dist/config.js';
 
 const base = {
   id: 'a',
@@ -83,6 +84,80 @@ describe('kmoni と P2P の合成', () => {
     assert.equal(merged.maxIntensity, 40);
     assert.equal(merged.hypocenter.name, '日向灘');
     assert.equal(merged.hypocenter.lat, 32.3);
+  });
+});
+
+describe('onEewEvent の kind 判定', () => {
+  /** hub / frames 側は今回の判定に関係ないのでフェイクで代替する。 */
+  const makeCoordinator = () => {
+    const events = [];
+    const coordinator = new EewCoordinator({
+      config: loadConfig({}),
+      hub: { publishEew() {} },
+      onActiveChange: () => {},
+      onEewEvent: (event) => events.push(event),
+    });
+    return { coordinator, events };
+  };
+
+  it('第一報は new', () => {
+    const { coordinator, events } = makeCoordinator();
+    coordinator.acceptKmoni({
+      id: '20260817111000',
+      reportNumber: 1,
+      alert: 'forecast',
+      isCancel: false,
+      isFinal: false,
+      isTraining: false,
+      hypocenter: { name: '日向灘', lat: 32.3, lon: 131.9, depthKm: 30, magnitude: 5.2 },
+      maxIntensity: 40,
+      originTime: new Date('2026-08-17T02:10:00.000Z'),
+      announcedAt: new Date('2026-08-17T02:10:05.000Z'),
+    });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].kind, 'new');
+  });
+
+  it('同一地震の続報は update', () => {
+    const { coordinator, events } = makeCoordinator();
+    const report = (reportNumber, announcedAt) => ({
+      id: '20260817111000',
+      reportNumber,
+      alert: 'forecast',
+      isCancel: false,
+      isFinal: false,
+      isTraining: false,
+      hypocenter: { name: '日向灘', lat: 32.3, lon: 131.9, depthKm: 30, magnitude: 5.2 },
+      maxIntensity: 40,
+      originTime: new Date('2026-08-17T02:10:00.000Z'),
+      announcedAt: new Date(announcedAt),
+    });
+    coordinator.acceptKmoni(report(1, '2026-08-17T02:10:05.000Z'));
+    coordinator.acceptKmoni(report(2, '2026-08-17T02:10:08.000Z'));
+    assert.equal(events.length, 2);
+    assert.equal(events[0].kind, 'new');
+    assert.equal(events[1].kind, 'update');
+  });
+
+  it('キャンセル報は cancel', () => {
+    const { coordinator, events } = makeCoordinator();
+    const report = (isCancel, announcedAt) => ({
+      id: '20260817111000',
+      reportNumber: 1,
+      alert: 'forecast',
+      isCancel,
+      isFinal: false,
+      isTraining: false,
+      hypocenter: { name: '日向灘', lat: 32.3, lon: 131.9, depthKm: 30, magnitude: 5.2 },
+      maxIntensity: 40,
+      originTime: new Date('2026-08-17T02:10:00.000Z'),
+      announcedAt: new Date(announcedAt),
+    });
+    coordinator.acceptKmoni(report(false, '2026-08-17T02:10:05.000Z'));
+    coordinator.acceptKmoni(report(true, '2026-08-17T02:10:08.000Z'));
+    assert.equal(events.length, 2);
+    assert.equal(events[0].kind, 'new');
+    assert.equal(events[1].kind, 'cancel');
   });
 });
 

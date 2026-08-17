@@ -2,6 +2,7 @@ import type { Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { ENDPOINTS, PROTOCOL_VERSION, type ClientMessage, type ServerEvent } from '@quake-panel/shared';
 import type { Config } from '../config.js';
+import type { DemoRunner } from '../demo/runner.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
 
@@ -28,6 +29,7 @@ export class ClientWebSocketServer {
     server: Server,
     private readonly config: Config,
     private readonly hub: Hub,
+    private readonly demo: DemoRunner,
   ) {
     this.wss = new WebSocketServer({ server, path: ENDPOINTS.ws });
 
@@ -54,6 +56,9 @@ export class ClientWebSocketServer {
               protocolVersion: PROTOCOL_VERSION,
               snapshot: hub.getSnapshot(),
             });
+          } else if (msg.type === 'demo') {
+            // 不正な scenario (未知の文字列) は trigger 内部で検証して無視する
+            this.demo.trigger(msg.scenario);
           }
         } catch (error) {
           log.debug(`bad client message: ${describeError(error as Error)}`);

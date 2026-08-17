@@ -3,6 +3,7 @@ import {
   applyHomeAreas,
   eewRelevance,
   formatJstClock,
+  isDemoEventId,
   matchesQuakeFilter,
   tsunamiAlertRank,
   tsunamiAreasForPrefecture,
@@ -78,6 +79,8 @@ export class App {
   private readonly quakeList: QuakeList;
   private readonly settingsPanel: SettingsPanel;
   private readonly splitter: Splitter;
+  /** 「デモ再生中」の誤認防止バナー。demo- の EEW/津波を受けている間だけ出す。 */
+  private readonly demoBanner: HTMLElement;
 
   private quakes: QuakeInfo[] = [];
   private tsunami: TsunamiInfo | null = null;
@@ -114,6 +117,7 @@ export class App {
     );
     this.eewPanel = new EewPanel(requireElement('eew-panel'));
     this.tsunamiPanel = new TsunamiPanel(requireElement('tsunami-panel'));
+    this.demoBanner = requireElement('demo-banner');
     this.quakeList = new QuakeList(requireElement('quake-list'));
     this.settingsPanel = new SettingsPanel({
       modal: requireElement('settings'),
@@ -125,6 +129,7 @@ export class App {
       isFixedByUrl: (key) => this.store.isFixedByUrl(key),
       onChange: (patch) => this.applySettings(patch),
       onTest: () => this.runAlertTest(),
+      onDemo: (scenario) => this.connection.sendDemo(scenario),
       onPickHome: () => this.startHomePick(),
       canUseCurrentLocation: () => canUseBrowserLocation(),
       requestCurrentLocation: () => requestBrowserLocation(),
@@ -233,6 +238,7 @@ export class App {
     this.mapView.setEew(eew);
     this.alert.applyEewSound(eew, this.settings.notifyForecast, relevance);
     this.refreshFlash();
+    this.refreshDemoBanner();
   }
 
   private applyTsunami(info: TsunamiInfo | null): void {
@@ -244,6 +250,18 @@ export class App {
     const rank = this.tsunamiRankNow(tsunami);
     this.alert.applyTsunamiSound(tsunami, rank);
     this.refreshFlash();
+    this.refreshDemoBanner();
+  }
+
+  /**
+   * デモ再生中の誤認防止バナー。
+   * 表示中の EEW か津波のどちらかが demo- のイベントなら出す。
+   * 津波は解除 (cancelled) 後も現況に残る作りなので、解除済みは対象から外す。
+   */
+  private refreshDemoBanner(): void {
+    const eewIsDemo = this.eew !== null && isDemoEventId(this.eew.id);
+    const tsunamiIsDemo = this.tsunami !== null && !this.tsunami.cancelled && isDemoEventId(this.tsunami.id);
+    this.demoBanner.hidden = !(eewIsDemo || tsunamiIsDemo);
   }
 
   /**

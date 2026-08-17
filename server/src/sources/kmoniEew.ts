@@ -115,7 +115,7 @@ export function parseKmoniEew(raw: KmoniEewRaw): KmoniEewReport | null {
 /**
  * kmoni EEW JSON の毎秒ポーリング。
  *
- * 無償で「予報」レベルまで取れる唯一の現実解 (§3)。取得した内容は自宅内の
+ * 無償で「予報」レベルまで取れる唯一の現実解 (§3)。取得した内容は
  * 私的表示にのみ使い、第三者への配信・通知サービス化には使わない (§2(2))。
  */
 export class KmoniEewWorker {

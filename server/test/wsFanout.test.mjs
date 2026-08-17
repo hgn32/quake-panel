@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { WebSocket } from 'ws';
 
 import { loadConfig } from '../dist/config.js';
+import { DemoRunner } from '../dist/demo/runner.js';
 import { Hub } from '../dist/hub.js';
 import { ClientWebSocketServer } from '../dist/ws/server.js';
 
@@ -86,7 +87,8 @@ const withPanel = (filterOptions, publish) => {
     const config = loadConfig({});
     const hub = new Hub(config);
     const notifierAccepted = attachFilteringListener(hub, filterOptions);
-    const wsServer = new ClientWebSocketServer(http, config, hub);
+    const demo = new DemoRunner(hub);
+    const wsServer = new ClientWebSocketServer(http, config, hub, demo);
     wsServer.start();
 
     const received = [];

@@ -180,7 +180,7 @@ export interface StateSnapshot {
   quakes: QuakeInfo[];
   tsunami: TsunamiInfo | null;
   /**
-   * サーバーが既定で取得している強震モニタの指標 (アドオンの設定)。
+   * サーバーが既定で取得している強震モニタの指標 (KMONI_LAYER)。
    * 端末が何も選んでいなければこれを表示する。
    */
   kmoniLayer: KmoniLayer;

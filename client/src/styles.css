@@ -646,6 +646,33 @@ body.cursor-hidden * {
   }
 }
 
+/* ---------- デモ再生 ---------- */
+
+/*
+ * 「本物と誤認されない」ことが最優先の要素なので、明滅より目立つ位置・色にする。
+ * demo- の EEW/津波を受けている間だけ表示する (app.ts の refreshDemoBanner)。
+ */
+.demo-banner {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  padding: 10px 28px;
+  border-radius: 999px;
+  background: #ffd60a;
+  color: #1b1d22;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 18px #000000aa;
+  pointer-events: none;
+}
+
+.demo-banner[hidden] {
+  display: none;
+}
+
 /* ---------- 設定 ---------- */
 
 .modal {
@@ -749,6 +776,26 @@ body.cursor-hidden * {
 .settings__hint {
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* デモ再生などの「実行前に必ず読ませたい」警告文。ヒントより目立たせる。 */
+.settings__warning {
+  margin: 0;
+  max-width: 320px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--warning);
+  text-align: right;
+}
+
+/* 問い合わせ時にビルドを特定するためだけの表示なので、常時目立たせる必要はない */
+.settings__version {
+  margin: 12px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid #1a2537;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
 }
 
 .settings__options {

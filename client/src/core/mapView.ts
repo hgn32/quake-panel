@@ -555,7 +555,7 @@ export class MapView {
     //   for ループ            中央値 1.1ms / フレーム
     //   forEach + filter      中央値 2.2ms / フレーム
     //
-    // と 2 倍違う。Pi4 では更に開くため、速い方を採る (2026-08-16 実測)。
+    // と 2 倍違う。非力な端末では更に開くため、速い方を採る (2026-08-16 実測)。
     // 他の箇所は規約どおり forEach / filter / map を使っている。
     const filled = new Uint8Array(width * height);
     const cap = KMONI_CAPTION_BOX;

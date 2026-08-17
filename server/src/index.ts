@@ -1,8 +1,10 @@
 import { loadConfig } from './config.js';
+import { DemoRunner } from './demo/runner.js';
 import { EewCoordinator } from './eew/coordinator.js';
 import { createHttpServer } from './http/server.js';
 import { Hub } from './hub.js';
 import { createLogger, describeError, setLogLevel } from './logger.js';
+import { WebhookNotifier } from './notify/webhookNotifier.js';
 import { applyGlobalProxy } from './proxy.js';
 import { KmoniClock } from './sources/kmoniClock.js';
 import { KmoniEewWorker } from './sources/kmoniEew.js';
@@ -24,16 +26,26 @@ function main(): Promise<void> {
   const hub = new Hub(config);
   const clock = new KmoniClock(config, hub);
   const frames = new KmoniFrameWorker(config, hub, clock);
+  // URL が設定されているときだけ生成する。生成しなければ既存動作への影響はゼロ。
+  const webhookNotifier =
+    config.eewWebhook.urls.length > 0 ? new WebhookNotifier(config) : null;
+  if (webhookNotifier) log.info(`eew webhook to ${config.eewWebhook.urls.join(', ')}`);
   const coordinator = new EewCoordinator({
     config,
     hub,
     onActiveChange: (active) => frames.setEewActive(active),
+    onEewEvent: (event) => webhookNotifier?.handle(event),
   });
   const kmoniEew = new KmoniEewWorker(config, hub, clock, (report) => coordinator.acceptKmoni(report));
   const p2p = new P2PClient(config, hub, (eew) => coordinator.acceptP2P(eew));
 
+  // 実際の地震発生を待たずに動作確認するためのデモ再生。発火は設定画面のボタンのみ
+  // (専用の HTTP エンドポイントは作らない)。Hub の通常配信経路にそのまま乗せるので、
+  // 詳しい理由は demo/runner.ts のコメントを参照。
+  const demo = new DemoRunner(hub);
+
   const httpServer = createHttpServer(config, hub, frames);
-  const wsServer = new ClientWebSocketServer(httpServer, config, hub);
+  const wsServer = new ClientWebSocketServer(httpServer, config, hub, demo);
 
   // 終了処理は `return` より前に定義する。`registerShutdown` は listen 後
   // (= main が return した後) に呼ばれるので、`return` の後ろに置くと
@@ -48,6 +60,7 @@ function main(): Promise<void> {
     frames.stop();
     kmoniEew.stop();
     coordinator.stop();
+    webhookNotifier?.stop();
     p2p.stop();
     void wsServer.stop().then(() => {
       httpServer.close(() => process.exit(0));
