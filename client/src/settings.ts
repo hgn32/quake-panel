@@ -73,9 +73,6 @@ export interface Settings {
   tsunamiNationalMajor: boolean;
 }
 
-/** URL で上書きできる設定。ここに無いものは端末の設定が常に勝つ。 */
-export type UrlKey = 'home' | 'tsunamiAreas';
-
 const STORAGE_KEY = 'quake-panel.settings.v1';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -102,41 +99,25 @@ export const DEFAULT_SETTINGS: Settings = {
 /**
  * 設定の持ち主。
  *
- * 強さは **URL > その端末の保存値 > 既定値**。URL で指定された値は保存しない
- * (パラメータを外したら元の設定に戻ってほしいため)。そのため「保存されている値」と
- * 「いま効いている値」を分けて持つ。
+ * 強さは **保存値 > 既定値**。保存できない環境 (プライベートモード等) でも
+ * 表示は続ける。
  */
 export class SettingsStore {
   private stored: Settings;
-  private readonly overrides: Partial<Settings>;
-  /** URL で固定されている項目。UI はこれを見て編集を止める。 */
-  readonly urlKeys: ReadonlySet<UrlKey>;
 
-  constructor(search: string = location.search, storage: Storage | null = safeStorage()) {
+  constructor(storage: Storage | null = safeStorage()) {
     this.stored = readStored(storage);
-    const { overrides, keys } = readUrlOverrides(search);
-    this.overrides = overrides;
-    this.urlKeys = keys;
   }
 
   /** いま効いている設定 */
   get current(): Settings {
-    return { ...this.stored, ...this.overrides };
+    return { ...this.stored };
   }
 
-  /** URL で固定されている項目は無視して更新する */
   update(patch: Partial<Settings>): Settings {
-    // URL で固定されている項目は捨てる (端末の保存値を書き換えない)
-    const accepted = Object.fromEntries(
-      Object.entries(patch).filter(([key]) => !this.urlKeys.has(key as UrlKey)),
-    ) as Partial<Settings>;
-    this.stored = { ...this.stored, ...accepted };
+    this.stored = { ...this.stored, ...patch };
     save(this.stored);
     return this.current;
-  }
-
-  isFixedByUrl(key: UrlKey): boolean {
-    return this.urlKeys.has(key);
   }
 }
 
@@ -191,43 +172,6 @@ function save(settings: Settings): void {
   } catch {
     // 保存できなくても表示は続ける
   }
-}
-
-/**
- * URL からの上書き。
- * `?lat=35.68&lon=139.76&tsunami=東京都,千葉県` のように指定する。
- */
-export function readUrlOverrides(search: string): {
-  overrides: Partial<Settings>;
-  keys: Set<UrlKey>;
-} {
-  const overrides: Partial<Settings> = {};
-  const keys = new Set<UrlKey>();
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(search);
-  } catch {
-    return { overrides, keys };
-  }
-
-  const lat = Number(params.get('lat'));
-  const lon = Number(params.get('lon'));
-  if (params.has('lat') && params.has('lon') && isLat(lat) && isLon(lon)) {
-    overrides.home = { lat, lon };
-    keys.add('home');
-  }
-
-  const tsunami = params.get('tsunami');
-  if (tsunami !== null) {
-    const areas = readAreas(tsunami.split(','));
-    if (areas) {
-      // URL で予報区を指定したなら、利用地からの自動決定より優先する
-      overrides.tsunamiAreas = areas;
-      overrides.tsunamiMode = 'manual';
-      keys.add('tsunamiAreas');
-    }
-  }
-  return { overrides, keys };
 }
 
 function readHome(value: Partial<HomeLocation> | undefined): HomeLocation | null {

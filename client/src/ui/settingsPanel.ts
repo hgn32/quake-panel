@@ -10,7 +10,7 @@ import {
   type HomeLocation,
   type KmoniLayer,
 } from '@quake-panel/shared';
-import type { Settings, UrlKey } from '../settings.js';
+import type { Settings } from '../settings.js';
 import { h, replaceChildren } from './dom.js';
 
 /** 津波予報区を手で選ぶときの選択肢。予報区名は県名を含むものが多いので県で選ばせる。 */
@@ -39,8 +39,6 @@ export interface SettingsPanelDeps {
   closeButton: HTMLElement;
   cancelButton: HTMLElement;
   getSettings: () => Settings;
-  /** URL で固定されている項目は編集させない */
-  isFixedByUrl: (key: UrlKey) => boolean;
   onChange: (patch: Partial<Settings>) => void;
   /** 音と画面明滅の両方を出すテスト */
   onTest: () => void;
@@ -476,18 +474,16 @@ export class SettingsPanel {
    * (取消で開いた時点へ戻せる)。
    */
   private homeRow(settings: Settings): HTMLElement {
-    const fixed = this.deps.isFixedByUrl('home');
-    const lat = this.coordInput(settings.home.lat, -90, 90, fixed, (value) =>
+    const lat = this.coordInput(settings.home.lat, -90, 90, (value) =>
       this.deps.onChange({ home: { ...this.deps.getSettings().home, lat: value } }),
     );
-    const lon = this.coordInput(settings.home.lon, -180, 180, fixed, (value) =>
+    const lon = this.coordInput(settings.home.lon, -180, 180, (value) =>
       this.deps.onChange({ home: { ...this.deps.getSettings().home, lon: value } }),
     );
     const pick = this.button('地図から選ぶ', () => {
       this.close();
       this.deps.onPickHome();
     });
-    pick.disabled = fixed;
 
     const status = h('span', { class: 'settings__hint' });
     const fill = (home: HomeLocation): void => {
@@ -502,7 +498,7 @@ export class SettingsPanel {
     const buttons: HTMLElement[] = [pick];
     if (this.deps.canUseCurrentLocation()) {
       buttons.push(
-        this.loadButton('現在地を取得', fixed, status, () => this.deps.requestCurrentLocation(), fill, (error) =>
+        this.loadButton('現在地を取得', status, () => this.deps.requestCurrentLocation(), fill, (error) =>
           // 位置情報 API のエラーは code で理由が分かる
           geolocationErrorMessage(typeof error.code === 'number' ? error.code : null),
         ),
@@ -517,9 +513,7 @@ export class SettingsPanel {
         h('span', { text: '利用地' }),
         h('span', {
           class: 'settings__hint',
-          text: fixed
-            ? 'URL で指定されているため変更できません。'
-            : '地図の中心と、速報・津波・履歴の判定に使います。',
+          text: '地図の中心と、速報・津波・履歴の判定に使います。',
         }),
         status,
       ),
@@ -545,7 +539,6 @@ export class SettingsPanel {
    */
   private loadButton(
     label: string,
-    fixed: boolean,
     status: HTMLElement,
     load: () => Promise<HomeLocation | null>,
     onLoaded: (home: HomeLocation) => void,
@@ -564,10 +557,9 @@ export class SettingsPanel {
           status.textContent = describeError(error);
         })
         .finally(() => {
-          button.disabled = fixed;
+          button.disabled = false;
         });
     });
-    button.disabled = fixed;
     return button;
   }
 
@@ -579,8 +571,7 @@ export class SettingsPanel {
    * 手動にすると県を複数選べる。
    */
   private tsunamiRow(settings: Settings): HTMLElement {
-    const fixed = this.deps.isFixedByUrl('tsunamiAreas');
-    const auto = settings.tsunamiMode === 'auto' && !fixed;
+    const auto = settings.tsunamiMode === 'auto';
 
     const select = h('select', { class: 'settings__select', multiple: 'multiple' });
     PREFECTURES.forEach((name) => {
@@ -590,12 +581,10 @@ export class SettingsPanel {
       );
       select.append(option);
     });
-    select.disabled = auto || fixed;
+    select.disabled = auto;
     const hint = h('span', { class: 'settings__hint' });
     const renderHint = (): void => {
-      hint.textContent = fixed
-        ? 'URL で指定されているため変更できません。'
-        : `いま強調する予報区: ${this.deps.describeTsunamiAreas()}`;
+      hint.textContent = `いま強調する予報区: ${this.deps.describeTsunamiAreas()}`;
     };
     select.addEventListener('change', () => {
       const areas = [...select.selectedOptions].map((option) => option.value);
@@ -615,11 +604,6 @@ export class SettingsPanel {
         this.render();
       },
     );
-    if (fixed) {
-      mode.querySelectorAll('input').forEach((input) => {
-        input.disabled = true;
-      });
-    }
 
     renderHint();
     return h(
@@ -639,7 +623,6 @@ export class SettingsPanel {
     value: number,
     min: number,
     max: number,
-    disabled: boolean,
     onChange: (value: number) => void,
   ): HTMLInputElement {
     const input = h('input', {
@@ -650,7 +633,6 @@ export class SettingsPanel {
       step: '0.001',
     });
     input.value = String(value);
-    input.disabled = disabled;
     input.addEventListener('change', () => {
       const next = Number(input.value);
       if (!Number.isFinite(next) || next < min || next > max) {

@@ -126,7 +126,6 @@ export class App {
       closeButton: requireElement('settings-close'),
       cancelButton: requireElement('settings-cancel'),
       getSettings: () => this.settings,
-      isFixedByUrl: (key) => this.store.isFixedByUrl(key),
       onChange: (patch) => this.applySettings(patch),
       onTest: () => this.runAlertTest(),
       onDemo: (scenario) => this.connection.sendDemo(scenario),
