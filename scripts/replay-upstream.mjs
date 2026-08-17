@@ -10,7 +10,11 @@
  *
  * 使い方:
  *
- *   node scripts/replay-upstream.mjs [--port 8090] [--scenario warning]
+ *   node scripts/replay-upstream.mjs [--port 8090]
+ *
+ * ブラウザで `http://127.0.0.1:8090/` を開くと操作ページが表示され、ボタンで
+ * 任意のシナリオを何度でも発火できる (`POST /trigger?scenario=...`)。
+ * トリガされるまでは常に平常応答 (発表なし) を返す。
  *
  * 別ターミナルで:
  *
@@ -19,8 +23,8 @@
  *   P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history \
  *   npm start
  *
- * シナリオ (`--scenario`, 既定 forecast):
- *   - forecast: 起動 3 秒後 (T0) から 20 秒間、kmoni EEW JSON が「予報」を返す。
+ * シナリオ (`scenario`, 発火すると T0 = 発火時刻 + 1 秒 で開始):
+ *   - forecast: T0 から 20 秒間、kmoni EEW JSON が「予報」を返す。
  *     震央は日向灘 (M5.0 / 深さ30km / calcintensity 4)。
  *   - warning : forecast と同じ流れで、T0+8 秒に alertflg が「警報」へ格上げ
  *     (calcintensity 5弱)。格上げと同時に P2P へ 556 (警報) を 1 通送る。
@@ -29,6 +33,13 @@
  *     音・明滅が即座に止まることの確認用。
  *   - tsunami : EEW は流さず、T0 に 552 (津波予報。宮崎県 Warning など) を送り、
  *     T0+40 秒に cancelled true (解除) を送る。
+ *
+ * 再トリガすると、進行中だったシナリオの未発火タイマーはすべて破棄され、
+ * 新しいシナリオ (新しい T0 由来の report_id) で上書きされる。
+ *
+ * `--scenario` を指定した場合は互換のため、起動 3 秒後に 1 回だけ自動でその
+ * シナリオを発火する (従来挙動)。指定しなければ自動発火はせず、操作ページの
+ * ボタン待ちになる。
  *
  * 終了は Ctrl-C。シナリオが終わっても平常応答を返し続ける
  * (接続維持の確認ができるように)。
@@ -59,6 +70,12 @@ function toJstDateTime(date) {
   );
 }
 
+/** Date → "hh:mm:ss" (JST)。ログ出力用。 */
+function toJstTime(date) {
+  const j = new Date(date.getTime() + JST_OFFSET_MS);
+  return `${pad(j.getUTCHours())}:${pad(j.getUTCMinutes())}:${pad(j.getUTCSeconds())}`;
+}
+
 /** P2P の `time` フィールドはミリ秒付き */
 function toP2PTime(date) {
   const j = new Date(date.getTime() + JST_OFFSET_MS);
@@ -79,15 +96,22 @@ const TRANSPARENT_GIF = Buffer.from([
 
 const SCENARIOS = ['forecast', 'warning', 'cancel', 'tsunami'];
 
+const SCENARIO_LABELS = {
+  forecast: '予報',
+  warning: '警報',
+  cancel: 'キャンセル報',
+  tsunami: '津波予報',
+};
+
 function parseArgs(argv) {
-  const args = { port: 8090, scenario: 'forecast' };
+  const args = { port: 8090, scenario: null };
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i];
     const value = argv[i + 1];
     if (key === '--port' && value) args.port = Number(value);
     else if (key === '--scenario' && value) args.scenario = value;
   }
-  if (!SCENARIOS.includes(args.scenario)) {
+  if (args.scenario !== null && !SCENARIOS.includes(args.scenario)) {
     throw new Error(`unknown --scenario: ${args.scenario} (must be one of ${SCENARIOS.join(', ')})`);
   }
   if (!Number.isFinite(args.port) || args.port <= 0) {
@@ -242,18 +266,122 @@ function tsunami552Cancel(now, id) {
   };
 }
 
+/** 操作ページ (依存なしの単一 HTML)。 */
+function controlPageHtml() {
+  const buttons = [
+    { scenario: 'forecast', label: '予報 (日向灘 M5.0)' },
+    { scenario: 'warning', label: '警報へ格上げ (予報→8秒後に警報+P2P 556)' },
+    { scenario: 'cancel', label: 'キャンセル報 (警報→14秒後に取消)' },
+    { scenario: 'tsunami', label: '津波予報 (宮崎県 警報→40秒後に解除)' },
+  ];
+  const buttonsHtml = buttons
+    .map((b) => `<button data-scenario="${b.scenario}">${b.label}</button>`)
+    .join('\n      ');
+
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>replay-upstream 操作ページ</title>
+<style>
+  body {
+    background: #14171c;
+    color: #e6e6e6;
+    font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
+    padding: 24px;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 18px; }
+  p.note { color: #9aa4b2; font-size: 13px; }
+  .buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 16px 0;
+  }
+  button {
+    background: #2a2f3a;
+    color: #e6e6e6;
+    border: 1px solid #444c5c;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+  }
+  button:hover { background: #3a4152; }
+  #status {
+    background: #1d2129;
+    border: 1px solid #333a46;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 14px;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <h1>replay-upstream 操作ページ</h1>
+  <p class="note">パネル本体は別のポートで開いてください (例 http://localhost:8080)。このページは kmoni / P2P の模擬サーバーを操作するだけです。</p>
+  <div class="buttons">
+      ${buttonsHtml}
+  </div>
+  <div id="status">状態を取得中...</div>
+<script>
+  document.querySelectorAll('button[data-scenario]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      fetch('/trigger?scenario=' + encodeURIComponent(btn.dataset.scenario), { method: 'POST' });
+    });
+  });
+
+  const statusEl = document.getElementById('status');
+  function refresh() {
+    fetch('/status')
+      .then((res) => res.json())
+      .then((data) => {
+        statusEl.textContent = data.phase;
+      })
+      .catch(() => {
+        statusEl.textContent = '状態の取得に失敗しました';
+      });
+  }
+  refresh();
+  setInterval(refresh, 1000);
+</script>
+</body>
+</html>
+`;
+}
+
+function sendJson(res, body) {
+  const text = JSON.stringify(body);
+  res.writeHead(200, {
+    'content-type': 'application/json',
+    'cache-control': 'no-cache',
+  });
+  res.end(text);
+}
+
+function sendHtml(res, html) {
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+  });
+  res.end(html);
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const startedAt = Date.now();
-  const t0 = startedAt + 3_000;
-  const t0Date = new Date(t0);
-  const reportId = toKmoniTimestamp(t0Date);
-  const originTime = new Date(t0 - 5_000);
 
-  process.stdout.write(
-    `[replay-upstream] scenario=${args.scenario} port=${args.port} ` +
-      `T0=${toJstDateTime(t0Date)} (JST) reportId=${reportId}\n`,
-  );
+  /** いまアームされているシナリオの状態。トリガされるまでは scenario === null (平常応答)。 */
+  const state = {
+    scenario: null,
+    t0: null,
+    reportId: null,
+    originTime: null,
+    timers: [],
+  };
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
@@ -271,7 +399,11 @@ function main() {
     }
 
     if (/^\/webservice\/hypo\/eew\/\d{14}\.json$/.test(url.pathname)) {
-      sendJson(res, eewBody(args.scenario, now, t0, reportId, originTime));
+      const body =
+        state.scenario === null
+          ? quietEewBody(now)
+          : eewBody(state.scenario, now, state.t0, state.reportId, state.originTime);
+      sendJson(res, body);
       return;
     }
 
@@ -286,6 +418,45 @@ function main() {
 
     if (url.pathname === '/v2/history') {
       sendJson(res, []);
+      return;
+    }
+
+    if (url.pathname === '/status') {
+      if (state.scenario === null || state.t0 === null) {
+        sendJson(res, { scenario: null, t0: null, now: now.toISOString(), phase: '待機中' });
+        return;
+      }
+      const elapsedSec = Math.round((now.getTime() - state.t0) / 1000);
+      const label = SCENARIO_LABELS[state.scenario] ?? state.scenario;
+      const phase = `${label} 再生中 (T0${elapsedSec >= 0 ? '+' : ''}${elapsedSec} 秒)`;
+      sendJson(res, {
+        scenario: state.scenario,
+        t0: new Date(state.t0).toISOString(),
+        now: now.toISOString(),
+        phase,
+      });
+      return;
+    }
+
+    if (url.pathname === '/trigger') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'text/plain' });
+        res.end('method not allowed (use POST)');
+        return;
+      }
+      const scenario = url.searchParams.get('scenario');
+      if (scenario === null || !SCENARIOS.includes(scenario)) {
+        res.writeHead(400, { 'content-type': 'text/plain' });
+        res.end(`invalid scenario: ${String(scenario)} (must be one of ${SCENARIOS.join(', ')})`);
+        return;
+      }
+      triggerScenario(scenario);
+      sendJson(res, { ok: true, scenario, t0: new Date(state.t0).toISOString() });
+      return;
+    }
+
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      sendHtml(res, controlPageHtml());
       return;
     }
 
@@ -309,43 +480,63 @@ function main() {
     });
   };
 
-  const at = (delayFromNowMs, fn) => {
-    const timer = setTimeout(fn, Math.max(0, delayFromNowMs));
-    timer.unref?.();
-  };
+  /**
+   * シナリオを発火する。既にアーム中のシナリオがあれば、その未発火タイマーを
+   * すべて破棄してから新しい T0 (発火時刻 + 1 秒) で張り直す。
+   */
+  function triggerScenario(scenario) {
+    state.timers.forEach((timer) => clearTimeout(timer));
+    state.timers = [];
 
-  if (args.scenario === 'warning' || args.scenario === 'cancel') {
-    at(t0 + 8_000 - startedAt, () => {
-      broadcast(eew556Warning(new Date(), t0, reportId, originTime, false));
-    });
+    const triggeredAt = Date.now();
+    const t0 = triggeredAt + 1_000;
+    const t0Date = new Date(t0);
+    const reportId = toKmoniTimestamp(t0Date);
+    const originTime = new Date(t0 - 5_000);
+
+    state.scenario = scenario;
+    state.t0 = t0;
+    state.reportId = reportId;
+    state.originTime = originTime;
+
+    process.stdout.write(`[${toJstTime(new Date())}] trigger: ${scenario} (T0=${toJstDateTime(t0Date)})\n`);
+
+    const at = (delayFromNowMs, fn) => {
+      const timer = setTimeout(fn, Math.max(0, delayFromNowMs));
+      timer.unref?.();
+      state.timers.push(timer);
+    };
+
+    if (scenario === 'warning' || scenario === 'cancel') {
+      at(t0 + 8_000 - triggeredAt, () => {
+        broadcast(eew556Warning(new Date(), t0, reportId, originTime, false));
+      });
+    }
+    if (scenario === 'cancel') {
+      at(t0 + 14_000 - triggeredAt, () => {
+        broadcast(eew556Warning(new Date(), t0, reportId, originTime, true));
+      });
+    }
+    if (scenario === 'tsunami') {
+      const tsunamiId = `replay-tsunami-${reportId}`;
+      at(t0 - triggeredAt, () => {
+        broadcast(tsunami552Warning(new Date(), tsunamiId));
+      });
+      at(t0 + 40_000 - triggeredAt, () => {
+        broadcast(tsunami552Cancel(new Date(), tsunamiId));
+      });
+    }
   }
-  if (args.scenario === 'cancel') {
-    at(t0 + 14_000 - startedAt, () => {
-      broadcast(eew556Warning(new Date(), t0, reportId, originTime, true));
-    });
-  }
-  if (args.scenario === 'tsunami') {
-    const tsunamiId = `replay-tsunami-${reportId}`;
-    at(t0 - startedAt, () => {
-      broadcast(tsunami552Warning(new Date(), tsunamiId));
-    });
-    at(t0 + 40_000 - startedAt, () => {
-      broadcast(tsunami552Cancel(new Date(), tsunamiId));
-    });
+
+  if (args.scenario !== null) {
+    const timer = setTimeout(() => triggerScenario(args.scenario), 3_000);
+    timer.unref?.();
+    process.stdout.write(`[replay-upstream] --scenario=${args.scenario} を起動 3 秒後に自動発火します\n`);
   }
 
   server.listen(args.port, () => {
     process.stdout.write(`[replay-upstream] listening on http://127.0.0.1:${args.port}\n`);
   });
-}
-
-function sendJson(res, body) {
-  const text = JSON.stringify(body);
-  res.writeHead(200, {
-    'content-type': 'application/json',
-    'cache-control': 'no-cache',
-  });
-  res.end(text);
 }
 
 main();
