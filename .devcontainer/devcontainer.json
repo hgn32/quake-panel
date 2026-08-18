@@ -39,7 +39,7 @@
       ]
     }
   },
-  "shutdownAction": "stopCompose",
+  "shutdownAction": "none",
   "initializeCommand": "sh .devcontainer/initializeCommand.sh",
   "postCreateCommand": "sh .devcontainer/postCreateCommand.sh",
   "postStartCommand": "sh .devcontainer/postStartCommand.sh",
