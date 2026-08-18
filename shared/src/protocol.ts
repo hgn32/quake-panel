@@ -47,7 +47,9 @@ export type ClientMessage =
   /** 取りこぼし時などに現況一括を要求する */
   | { type: 'resync' }
   /** デモ再生の発火。実電文と同形のイベントを通常配信経路で全端末に流す。 */
-  | { type: 'demo'; scenario: DemoScenario };
+  | { type: 'demo'; scenario: DemoScenario }
+  /** 進行中のデモを即時停止し、表示も消す。確認なしで全端末に効く安全側の操作。 */
+  | { type: 'demo-stop' };
 
 /** デモ再生の id に必ず付く接頭辞。実電文の id には出現しない前提。 */
 const DEMO_ID_PREFIX = 'demo-';

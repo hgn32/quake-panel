@@ -59,6 +59,8 @@ export class ClientWebSocketServer {
           } else if (msg.type === 'demo') {
             // 不正な scenario (未知の文字列) は trigger 内部で検証して無視する
             this.demo.trigger(msg.scenario);
+          } else if (msg.type === 'demo-stop') {
+            this.demo.stop();
           }
         } catch (error) {
           log.debug(`bad client message: ${describeError(error as Error)}`);

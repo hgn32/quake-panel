@@ -66,6 +66,11 @@ export class ServerConnection {
     this.send({ type: 'demo', scenario });
   }
 
+  /** 設定画面のデモ停止ボタンから。進行中のデモを全端末で即時停止させる */
+  sendDemoStop(): void {
+    this.send({ type: 'demo-stop' });
+  }
+
   private setState(state: ConnectionState): void {
     if (this.state === state) return;
     this.state = state;

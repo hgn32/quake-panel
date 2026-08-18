@@ -167,8 +167,9 @@ describe('デモ再生 (DemoRunner)', () => {
     assert.equal(newReports.length, 11);
 
     const nullEvents = events.filter((e) => e.type === 'eew' && e.eew === null);
-    // forecast 側の null (T0+35s) は上書きで止まっているので、warning 側の 1 回だけ
-    assert.equal(nullEvents.length, 1);
+    // 上書き時に前のデモ (forecast) の表示終了 null がその場で 1 回配信され (残留防止)、
+    // さらに warning 側の表示終了 null が最後に 1 回配信されるので、合計 2 回。
+    assert.equal(nullEvents.length, 2);
   });
 
   it('不正なシナリオは無視する', () => {
@@ -233,5 +234,108 @@ describe('デモ再生 (DemoRunner)', () => {
     assert.doesNotThrow(() => mock.timers.tick(36_000));
 
     assert.equal(events.filter((e) => e.type === 'eew').length, 12);
+  });
+
+  it('stop(): EEW デモ進行中に止めると、その場で null が配信され expired が飛ぶ', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const events = attachRecorder(hub);
+    const eewEvents = [];
+    const runner = new DemoRunner(hub, (event) => eewEvents.push(event));
+
+    runner.trigger('forecast');
+    mock.timers.tick(3_000); // 第1・2報まで進める
+
+    runner.stop();
+
+    const nullEvents = events.filter((e) => e.type === 'eew' && e.eew === null);
+    assert.equal(nullEvents.length, 1, 'stop() で null が配信されていない');
+    assert.equal(
+      eewEvents.filter((e) => e.kind === 'expired').length,
+      1,
+      'stop() で expired が 1 回飛んでいない',
+    );
+
+    // 以降タイマーを進めても、止めたデモの続きは配信されない
+    const countBefore = events.filter((e) => e.type === 'eew').length;
+    mock.timers.tick(60_000);
+    assert.equal(events.filter((e) => e.type === 'eew').length, countBefore);
+  });
+
+  it('stop(): 津波デモ進行中 (解除前) に止めると、その場で解除報が配信される', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const events = attachRecorder(hub);
+    const runner = new DemoRunner(hub);
+
+    runner.trigger('tsunami');
+    mock.timers.tick(2_000); // 第1報 (T0+1s) だけ配信させ、T0+40s の解除より前で止める
+
+    runner.stop();
+
+    const tsunamiEvents = events.filter((e) => e.type === 'tsunami');
+    assert.equal(tsunamiEvents.length, 2, '第1報 + stop() による解除報の 2 件のはず');
+    const cancelled = tsunamiEvents[1].tsunami;
+    assert.equal(cancelled.cancelled, true);
+    assert.deepEqual(cancelled.areas, []);
+
+    // 以降タイマーを進めても (本来の T0+40s の解除タイマーは cancelTimers 済み)、追加配信は無い
+    mock.timers.tick(60_000);
+    assert.equal(events.filter((e) => e.type === 'tsunami').length, 2);
+  });
+
+  it('【回帰】津波デモ進行中に trigger で上書きすると、解除報が配信されてから新シナリオが始まる', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const events = attachRecorder(hub);
+    const runner = new DemoRunner(hub);
+
+    runner.trigger('tsunami');
+    mock.timers.tick(2_000); // 第1報のみ配信させる (解除前)
+
+    runner.trigger('forecast'); // 別デモで上書き
+
+    const tsunamiEvents = events.filter((e) => e.type === 'tsunami');
+    // 上書きの時点で、津波デモの解除報がその場で飛んでいなければならない
+    // (修正前は cancelTimers() だけだったため、この解除報が飛ばず残留していた)
+    assert.equal(tsunamiEvents.length, 2, '上書き時に津波の解除報が配信されていない (残留バグ)');
+    assert.equal(tsunamiEvents[1].tsunami.cancelled, true);
+
+    mock.timers.tick(36_000);
+    const eewEvents = events.filter((e) => e.type === 'eew');
+    // forecast の第1報〜第11報 + 表示終了の null が流れる
+    assert.equal(eewEvents.length, 12, '上書き後の forecast デモが最後まで流れていない');
+  });
+
+  it('【回帰】津波デモ進行中に実 EEW を受けると、デモ津波の解除報が配信され、実 EEW の表示は消されない', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const events = attachRecorder(hub);
+    const runner = new DemoRunner(hub);
+
+    runner.trigger('tsunami');
+    mock.timers.tick(2_000); // 第1報のみ配信させる (解除前)
+
+    hub.publishEew(REAL_EEW); // 実 EEW (demo- でない id) の受信
+
+    const tsunamiEvents = events.filter((e) => e.type === 'tsunami');
+    // 実 EEW 受信をきっかけに、デモ津波の解除報がその場で飛んでいなければならない
+    assert.equal(tsunamiEvents.length, 2, '実 EEW 受信時に津波の解除報が配信されていない (残留バグ)');
+    assert.equal(tsunamiEvents[1].tsunami.cancelled, true);
+
+    // 実 EEW 自体は届いており、null で消されてもいない
+    const eewEvents = events.filter((e) => e.type === 'eew');
+    assert.equal(eewEvents.length, 1, '実 EEW 以外の eew イベントが配信されている');
+    assert.equal(eewEvents[0].eew && eewEvents[0].eew.id, REAL_EEW.id);
+  });
+
+  it('stop(): 何も進行していない状態で呼んでも例外にならず、何も配信されない', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    const events = attachRecorder(hub);
+    const runner = new DemoRunner(hub);
+
+    assert.doesNotThrow(() => runner.stop());
+    assert.equal(events.length, 0);
   });
 });

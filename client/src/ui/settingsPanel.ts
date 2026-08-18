@@ -44,6 +44,8 @@ export interface SettingsPanelDeps {
   onTest: () => void;
   /** デモ再生の発火。実行が確定した後に呼ばれる */
   onDemo: (scenario: DemoScenario) => void;
+  /** デモ停止の発火。確認なしで即座に呼ばれる */
+  onDemoStop: () => void;
   /** 地図をクリックして利用地を選ぶモードに入る */
   onPickHome: () => void;
   /** ブラウザの位置情報が使えるか (HTTPS でないと使えないのでボタンごと隠す) */
@@ -297,7 +299,8 @@ export class SettingsPanel {
 
     return this.row(
       'デモ再生',
-      '実際の電文と同じ形のデモを全端末に流します。実発生時はデモを即中止して本物を優先します。',
+      '実際の電文と同じ形のデモを全端末に流します。実発生時はデモを即中止して本物を優先します。' +
+        '「停止」で進行中のデモを即座に消せます。',
       h(
         'div',
         { class: 'settings__options' },
@@ -307,6 +310,7 @@ export class SettingsPanel {
             this.render();
           }),
         ),
+        this.button('停止', () => this.deps.onDemoStop()),
       ),
     );
   }

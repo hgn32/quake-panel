@@ -129,6 +129,7 @@ export class App {
       onChange: (patch) => this.applySettings(patch),
       onTest: () => this.runAlertTest(),
       onDemo: (scenario) => this.connection.sendDemo(scenario),
+      onDemoStop: () => this.connection.sendDemoStop(),
       onPickHome: () => this.startHomePick(),
       canUseCurrentLocation: () => canUseBrowserLocation(),
       requestCurrentLocation: () => requestBrowserLocation(),

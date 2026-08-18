@@ -72,6 +72,20 @@ interface EewSeriesOptions {
  *
  * デモも実電文と同様に onEewEvent (webhook 連携) へ流す。id は demo- 接頭辞付きなので
  * 受信側で区別できる。津波デモは webhook 対象外 (EewEvent は EEW 専用) のため送らない。
+ *
+ * オンエア中のデモの後始末について:
+ *   デモを timer だけで進行させると、進行中に別の理由で打ち切られたとき
+ *   (再トリガによる上書き、実イベント受信による中止、stop() での明示停止) に
+ *   「解除報」や「表示終了の null」が飛ばないまま画面に残留してしまう
+ *   (サーバーを再起動するまで消えないバグがあった)。
+ *   これを防ぐため、いま画面に出ているはずのデモの状態を onAirEew / onAirTsunami に
+ *   常に控えておき、打ち切るときは必ず clearOnAirEew / clearOnAirTsunami を通して
+ *   後始末 (必要なら null 配信・解除報配信 + 追跡のリセット) を行う。
+ *   ただし、実イベントが上書き済みのとき (デモ EEW→実 EEW、実津波→デモ津波中止など)は
+ *   publish せずに追跡だけ破棄する。ここで publish してしまうと実イベントの表示を
+ *   誤って消してしまうため、呼び出し側で publish の要否を明示的に指定させている。
+ *
+ * 設定画面の「停止」ボタン (stop()) は、この後始末を明示的に呼び出す入口。
  */
 export class DemoRunner {
   private timers: NodeJS.Timeout[] = [];
@@ -79,6 +93,10 @@ export class DemoRunner {
   private realEewActive: boolean;
   /** 本物の (demo- でない) 津波予報が現在表示中 (解除されていない) か */
   private realTsunamiActive: boolean;
+  /** いま画面に出ているはずのデモ EEW。null 配信済み/未開始なら null。 */
+  private onAirEew: EewState | null = null;
+  /** いま画面に出ているはずのデモ津波予報。解除済み/未開始なら null。 */
+  private onAirTsunami: TsunamiInfo | null = null;
 
   constructor(
     private readonly hub: Hub,
@@ -101,8 +119,11 @@ export class DemoRunner {
       return;
     }
 
-    // 前のデモが進行中なら止めて上書きする
+    // 前のデモが進行中なら止めて上書きする。タイマーを止めるだけでは
+    // 「解除報」「表示終了の null」が飛ばず表示が残留するため、後始末も行う。
     this.cancelTimers();
+    this.clearOnAirEew(true);
+    this.clearOnAirTsunami(true);
 
     const t0 = Date.now() + 1000;
     const id = `${DEMO_ID_PREFIX}${toKmoniTimestamp(new Date(t0))}`;
@@ -126,6 +147,18 @@ export class DemoRunner {
     }
   }
 
+  /** 設定画面の停止ボタンから。進行中のデモを止め、オンエア中のデモ表示も即座に消す。 */
+  stop(): void {
+    if (this.timers.length === 0 && this.onAirEew === null && this.onAirTsunami === null) {
+      log.info('停止するデモはありません');
+      return;
+    }
+    this.cancelTimers();
+    this.clearOnAirEew(true);
+    this.clearOnAirTsunami(true);
+    log.info('デモ再生を停止しました');
+  }
+
   /** 実イベント優先。デモ以外の EEW/津波を受けたら、進行中のデモのタイマーを即中止する。 */
   private onHubEvent(event: ServerEvent): void {
     if (event.type === 'eew') {
@@ -139,6 +172,11 @@ export class DemoRunner {
         log.info('実際の EEW を受信したため、進行中のデモを中止します');
         this.cancelTimers();
       }
+      // 実 EEW が Hub をすでに上書きしているので、デモの null は publish しない
+      // (publish すると実 EEW の表示を消してしまう)。追跡だけ破棄する。
+      this.clearOnAirEew(false);
+      // デモ津波が残っていれば解除報を出す (実 EEW は津波を上書きしていないため publish してよい)。
+      this.clearOnAirTsunami(true);
       return;
     }
     if (event.type === 'tsunami') {
@@ -148,12 +186,14 @@ export class DemoRunner {
         log.info('実際の津波予報を受信したため、進行中のデモを中止します');
         this.cancelTimers();
       }
+      // 実津波がすでに Hub を上書きしているので、デモの解除報は publish しない。
+      this.clearOnAirTsunami(false);
+      // デモ EEW が残っていれば null を配信して消す (実津波は EEW を上書きしていないため publish してよい)。
+      this.clearOnAirEew(true);
     }
   }
 
   private runEewSeries(id: string, t0: number, options: EewSeriesOptions): void {
-    // clearAtSec のタイマーで expired イベントを発火するために、最後に配信した状態を控えておく。
-    let lastState: EewState | null = null;
     REPORT_OFFSETS_SEC.forEach((offsetSec, index) => {
       this.after(T0_DELAY_MS + offsetSec * 1000, () => {
         const isFinal = index === REPORT_OFFSETS_SEC.length - 1;
@@ -171,27 +211,26 @@ export class DemoRunner {
           options.cancelAtSec !== undefined && prevOffsetSec !== undefined && prevOffsetSec >= options.cancelAtSec;
         const cancelRising = cancelled && !prevCancelled;
         const kind: EewEventKind = cancelRising ? 'cancel' : index === 0 ? 'new' : 'update';
-        lastState = state;
+        this.onAirEew = state;
         this.onEewEvent?.({ kind, eew: state });
       });
     });
     this.after(T0_DELAY_MS + options.clearAtSec * 1000, () => {
       log.info(`デモ EEW ${id} の表示を終了します`);
-      this.hub.publishEew(null);
-      if (lastState !== null) {
-        this.onEewEvent?.({ kind: 'expired', eew: lastState });
-      }
+      this.clearOnAirEew(true);
     });
   }
 
   private runTsunami(id: string, t0: number): void {
     this.after(T0_DELAY_MS, () => {
       log.info(`デモ津波予報 ${id} を配信`);
-      this.hub.publishTsunami(buildTsunamiInfo(id, t0));
+      const info = buildTsunamiInfo(id, t0);
+      this.onAirTsunami = info;
+      this.hub.publishTsunami(info);
     });
     this.after(T0_DELAY_MS + 40_000, () => {
       log.info(`デモ津波予報 ${id} の解除を配信`);
-      this.hub.publishTsunami({ ...buildTsunamiInfo(id, t0), cancelled: true, areas: [] });
+      this.clearOnAirTsunami(true);
     });
     // T0+50s: 仕様上は「現況から消す」タイミングだが、ServerEvent の tsunami は
     // EewState と違って null を持てず、Hub.publishTsunami も解除後の状態を
@@ -204,6 +243,32 @@ export class DemoRunner {
   private cancelTimers(): void {
     this.timers.forEach((timer) => clearTimeout(timer));
     this.timers = [];
+  }
+
+  /**
+   * デモ EEW の後始末。publish が true なら null を配信して webhook にも expired を流す。
+   * false なら (実イベントに上書きされた等で publish できない場合) 追跡だけ破棄する。
+   */
+  private clearOnAirEew(publish: boolean): void {
+    if (this.onAirEew === null) return;
+    const last = this.onAirEew;
+    if (publish) {
+      this.hub.publishEew(null);
+      this.onEewEvent?.({ kind: 'expired', eew: last });
+    }
+    this.onAirEew = null;
+  }
+
+  /**
+   * デモ津波の後始末。publish が true なら解除報 (cancelled/areas 空) を配信する。
+   * false なら (実イベントに上書きされた等で publish できない場合) 追跡だけ破棄する。
+   */
+  private clearOnAirTsunami(publish: boolean): void {
+    if (this.onAirTsunami === null) return;
+    if (publish) {
+      this.hub.publishTsunami({ ...this.onAirTsunami, cancelled: true, areas: [] });
+    }
+    this.onAirTsunami = null;
   }
 
   private after(delayMs: number, fn: () => void): void {
