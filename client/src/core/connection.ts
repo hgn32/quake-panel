@@ -35,6 +35,12 @@ export class ServerConnection {
   private retryDelay = 1000;
   private closed = false;
   private state: ConnectionState = 'connecting';
+  /**
+   * socket を張り直すたびに 1 増える世代番号。
+   * close/open/message は非同期に届くため、stop() や次の connect() のあとに
+   * 古い socket のイベントが遅れて来ても無視できるようにする (多重接続・状態の後書き防止, §10)。
+   */
+  private generation = 0;
 
   private readonly heartbeatMs: number;
   private readonly stallTimeoutMs: number;
@@ -61,14 +67,17 @@ export class ServerConnection {
     this.send({ type: 'resync' });
   }
 
-  /** 設定画面のデモ再生ボタンから、実電文と同形のデモを全端末へ流させる */
-  sendDemo(scenario: DemoScenario): void {
-    this.send({ type: 'demo', scenario });
+  /**
+   * 設定画面のデモ再生ボタンから、実電文と同形のデモを全端末へ流させる。
+   * 切断中は送れないため、送信できたかを呼び出し側へ返す (§7)。
+   */
+  sendDemo(scenario: DemoScenario): boolean {
+    return this.send({ type: 'demo', scenario });
   }
 
-  /** 設定画面のデモ停止ボタンから。進行中のデモを全端末で即時停止させる */
-  sendDemoStop(): void {
-    this.send({ type: 'demo-stop' });
+  /** 設定画面のデモ停止ボタンから。進行中のデモを全端末で即時停止させる。戻り値は sendDemo と同じ。 */
+  sendDemoStop(): boolean {
+    return this.send({ type: 'demo-stop' });
   }
 
   private setState(state: ConnectionState): void {
@@ -79,11 +88,17 @@ export class ServerConnection {
 
   private connect(): void {
     if (this.closed) return;
+    this.generation += 1;
+    const generation = this.generation;
+    // この世代の socket からのイベントとして扱ってよいか (世代が変わった・stop 済みなら無視)
+    const isCurrent = (): boolean => generation === this.generation && !this.closed;
+
     this.setState('connecting');
     const socket = new WebSocket(resolveWsUrl(ENDPOINTS.ws));
     this.socket = socket;
 
     socket.addEventListener('open', () => {
+      if (!isCurrent()) return;
       this.retryDelay = 1000;
       this.setState('open');
       this.startHeartbeat();
@@ -91,6 +106,7 @@ export class ServerConnection {
     });
 
     socket.addEventListener('message', (ev) => {
+      if (!isCurrent()) return;
       this.armStallTimer();
       let parsed: JsonValue;
       try {
@@ -102,7 +118,12 @@ export class ServerConnection {
       if (isServerEvent(parsed)) this.options.onEvent(parsed as ServerEvent);
     });
 
-    socket.addEventListener('close', () => this.scheduleReconnect());
+    socket.addEventListener('close', () => {
+      // 世代が変わっている (stop→start で張り直し済み) か、stop 済みなら
+      // このイベントはもう「いまの接続」の話ではないので何もしない。
+      if (!isCurrent()) return;
+      this.scheduleReconnect();
+    });
     socket.addEventListener('error', () => socket.close());
   }
 
@@ -143,9 +164,12 @@ export class ServerConnection {
     this.reconnectTimer = null;
   }
 
-  private send(message: ClientMessage): void {
+  /** 送れたら true。切断中 (再接続待ち含む) は何もせず false を返す。 */
+  private send(message: ClientMessage): boolean {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(message));
+      return true;
     }
+    return false;
   }
 }

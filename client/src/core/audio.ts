@@ -12,6 +12,16 @@ import { DEFAULT_SOUND_SECONDS } from '@quake-panel/shared';
  */
 export type AlertSound = 'warning' | 'forecast' | 'detection' | 'tsunami';
 
+/**
+ * 鳴動の系統。EEW (warning/forecast/detection) と津波 (tsunami) は別事象なので、
+ * 一方のキャンセル・打ち切りでもう一方まで止めないよう分けて管理する。
+ */
+export type AlertCategory = 'eew' | 'tsunami';
+
+function categoryFor(sound: AlertSound): AlertCategory {
+  return sound === 'tsunami' ? 'tsunami' : 'eew';
+}
+
 interface Tone {
   freq: number;
   start: number;
@@ -61,11 +71,19 @@ export class AlertAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private volume = 0.7;
-  private active: AudioScheduledSourceNode[] = [];
-  /** 鳴り始めてから maxSeconds で黙らせるためのタイマー */
-  private silenceTimer: number | null = null;
+  private active: Array<{ node: AudioScheduledSourceNode; category: AlertCategory }> = [];
+  /** 鳴り始めてから maxSeconds で黙らせるためのタイマー (系統ごと) */
+  private silenceTimers: Record<AlertCategory, number | null> = { eew: null, tsunami: null };
   /** 鳴らし続ける上限 (秒)。0 ならパターンどおり鳴らし切る。 */
   private maxSeconds = DEFAULT_SOUND_SECONDS;
+  /**
+   * unlock (resume) 待ちの間に要求された最新の 1 件。
+   * suspended のままオシレータを積んでも `currentTime` が進まず鳴らないうえ
+   * 'ended' も発火しないため無限に溜まってしまう。running に戻った瞬間に
+   * この 1 件だけ鳴らし、それより前の分は捨てる (過去の警報が resume 時に
+   * まとめて再生されるのを防ぐ)。
+   */
+  private pendingSound: { sound: AlertSound; repeatOverride: number | undefined } | null = null;
 
   get isUnlocked(): boolean {
     return this.context !== null && this.context.state === 'running';
@@ -88,13 +106,25 @@ export class AlertAudio {
       const resumed =
         context.state === 'suspended' ? context.resume() : Promise.resolve();
       return resumed.then(
-        () => context.state === 'running',
+        () => {
+          const running = context.state === 'running';
+          // running に戻った瞬間、待たせていた最新の 1 件があれば鳴らす
+          if (running) this.flushPendingSound();
+          return running;
+        },
         // 解錠できなくても表示は続ける (音だけ出ない)
         () => false,
       );
     } catch {
       return Promise.resolve(false);
     }
+  }
+
+  /** suspended 中に溜めておいた最新の要求を鳴らす (無ければ何もしない) */
+  private flushPendingSound(): void {
+    const pending = this.pendingSound;
+    this.pendingSound = null;
+    if (pending) this.play(pending.sound, pending.repeatOverride);
   }
 
   /** 端末ごとの設定から上限を受け取る */
@@ -128,6 +158,17 @@ export class AlertAudio {
     const master = this.master;
     if (!ctx || !master || this.volume <= 0) return;
 
+    if (ctx.state !== 'running') {
+      // unlock 前 (あるいは何らかの理由で再び suspended になった) は
+      // currentTime が凍結したままオシレータだけが積み上がり、resume した
+      // 瞬間に過去分がまとめて鳴ってしまう。ここでは鳴らさず、最新の 1 件
+      // だけ憶えておいて running に戻ってから鳴らす (flushPendingSound)。
+      this.pendingSound = { sound, repeatOverride };
+      return;
+    }
+    this.pendingSound = null;
+
+    const category = categoryFor(sound);
     const pattern = PATTERNS[sound];
     const repeat = repeatOverride ?? pattern.repeat;
     const base = ctx.currentTime + 0.02;
@@ -152,40 +193,58 @@ export class AlertAudio {
         gain.connect(master);
         osc.start(at);
         osc.stop(at + tone.duration + 0.02);
-        this.track(osc);
+        this.track(osc, category);
       });
     });
 
-    // 予定より長引いた場合 (連続で鳴らされた場合を含む) の保険
-    if (this.silenceTimer !== null) window.clearTimeout(this.silenceTimer);
+    // 予定より長引いた場合 (連続で鳴らされた場合を含む) の保険。
+    // 系統ごとに持つので、片方の系統の再生が他方のタイマーを引き直さない。
+    const prevTimer = this.silenceTimers[category];
+    if (prevTimer !== null) window.clearTimeout(prevTimer);
     if (this.maxSeconds > 0) {
-      this.silenceTimer = window.setTimeout(() => {
-        this.silenceTimer = null;
-        this.stop();
+      this.silenceTimers[category] = window.setTimeout(() => {
+        this.silenceTimers[category] = null;
+        this.stop(category);
       }, this.maxSeconds * 1000);
+    } else {
+      this.silenceTimers[category] = null;
     }
   }
 
-  /** キャンセル報などで即座に黙らせる */
-  stop(): void {
-    if (this.silenceTimer !== null) {
-      window.clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
-    this.active.forEach((node) => {
-      try {
-        node.stop();
-      } catch {
-        // すでに終了しているノードは無視
+  /**
+   * 即座に黙らせる。
+   * `category` を指定するとその系統だけ止める (例: EEW キャンセル報では
+   * 'eew' だけを止め、鳴っている津波警報は続ける)。省略時は全系統を止める。
+   */
+  stop(category?: AlertCategory): void {
+    const categories: AlertCategory[] = category ? [category] : ['eew', 'tsunami'];
+    categories.forEach((cat) => {
+      const timer = this.silenceTimers[cat];
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        this.silenceTimers[cat] = null;
       }
     });
-    this.active = [];
+    this.active
+      .filter((entry) => categories.includes(entry.category))
+      .forEach((entry) => {
+        try {
+          entry.node.stop();
+        } catch {
+          // すでに終了しているノードは無視
+        }
+      });
+    this.active = this.active.filter((entry) => !categories.includes(entry.category));
+    // 止めた系統を待っていたかもしれない pending 分も捨てる
+    if (this.pendingSound && categories.includes(categoryFor(this.pendingSound.sound))) {
+      this.pendingSound = null;
+    }
   }
 
-  private track(node: AudioScheduledSourceNode): void {
-    this.active.push(node);
+  private track(node: AudioScheduledSourceNode, category: AlertCategory): void {
+    this.active.push({ node, category });
     node.addEventListener('ended', () => {
-      this.active = this.active.filter((n) => n !== node);
+      this.active = this.active.filter((entry) => entry.node !== node);
     });
   }
 }

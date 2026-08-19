@@ -140,8 +140,9 @@ export class AlertPresenter {
   applyEewSound(eew: EewState | null, notifyForecast: boolean, relevance: EewRelevance): void {
     if (!eew) return;
     if (eew.isCancel) {
-      // 誤報と分かった時点で即座に黙らせる
-      this.audio.stop();
+      // 誤報と分かった時点で即座に黙らせる。EEW 系統だけを止め、
+      // 同時に鳴っているかもしれない津波警報 (別事象) は止めない。
+      this.audio.stop('eew');
       this.lastSound.eew = `${eew.id}:cancelled`;
       return;
     }

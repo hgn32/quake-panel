@@ -29,19 +29,27 @@ export class TsunamiPanel {
     }
     this.root.hidden = false;
 
+    // 一覧の並びは利用地を上に出す (既存の意図)。見出し・枠色は別に全国最大で決める。
     const sorted = [...tsunami.areas].sort((a, b) => {
       if (a.isHome !== b.isHome) return a.isHome ? -1 : 1;
       return (GRADE_ORDER[b.grade] ?? 0) - (GRADE_ORDER[a.grade] ?? 0);
     });
-    const top = sorted[0];
-    this.root.dataset['grade'] = top ? top.grade : 'Unknown';
+    // 見出し・枠色 (dataset.grade) は利用地グレードではなく全国の最大グレードにする。
+    // 利用地が注意報でも他地域に大津波警報が出ていれば、そちらを見出しに出す (§9)。
+    const nationalTop = [...tsunami.areas].sort(
+      (a, b) => (GRADE_ORDER[b.grade] ?? 0) - (GRADE_ORDER[a.grade] ?? 0),
+    )[0];
+    this.root.dataset['grade'] = nationalTop ? nationalTop.grade : 'Unknown';
 
     replaceChildren(
       this.root,
       h(
         'div',
         { class: 'tsunami__head' },
-        h('h2', { class: 'panel__title', text: top ? GRADE_LABEL[top.grade] ?? '津波予報' : '津波予報' }),
+        h('h2', {
+          class: 'panel__title',
+          text: nationalTop ? GRADE_LABEL[nationalTop.grade] ?? '津波予報' : '津波予報',
+        }),
         // デモ再生の誤認防止 (バナーと合わせて二重に示す)。既存の tag class をそのまま流用する。
         isDemoEventId(tsunami.id) ? h('span', { class: 'tag', text: 'デモ' }) : null,
         h('span', {

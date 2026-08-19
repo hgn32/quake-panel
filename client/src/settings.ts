@@ -104,8 +104,10 @@ export const DEFAULT_SETTINGS: Settings = {
  */
 export class SettingsStore {
   private stored: Settings;
+  private readonly storage: Storage | null;
 
   constructor(storage: Storage | null = safeStorage()) {
+    this.storage = storage;
     this.stored = readStored(storage);
   }
 
@@ -116,7 +118,7 @@ export class SettingsStore {
 
   update(patch: Partial<Settings>): Settings {
     this.stored = { ...this.stored, ...patch };
-    save(this.stored);
+    save(this.storage, this.stored);
     return this.current;
   }
 }
@@ -140,9 +142,9 @@ function readStored(storage: Storage | null): Settings {
       zoom?: number;
     };
     return {
-      notifyForecast: parsed.notifyForecast ?? DEFAULT_SETTINGS.notifyForecast,
-      volume: clamp(parsed.volume ?? DEFAULT_SETTINGS.volume, 0, 1),
-      historyCount: clamp(parsed.historyCount ?? DEFAULT_SETTINGS.historyCount, 3, 12),
+      notifyForecast: readBoolean(parsed.notifyForecast, DEFAULT_SETTINGS.notifyForecast),
+      volume: clampNumber(parsed.volume, 0, 1, DEFAULT_SETTINGS.volume),
+      historyCount: clampNumber(parsed.historyCount, 3, 12, DEFAULT_SETTINGS.historyCount),
       home: readHome(parsed.home) ?? { ...DEFAULT_SETTINGS.home },
       tsunamiMode: parsed.tsunamiMode === 'manual' ? 'manual' : 'auto',
       tsunamiAreas: readAreas(parsed.tsunamiAreas) ?? [...DEFAULT_SETTINGS.tsunamiAreas],
@@ -150,7 +152,7 @@ function readStored(storage: Storage | null): Settings {
       // 画面に収まるかは表示時に判断するので、ここでは負の値だけ弾く
       sideWidth: readSize(parsed.sideWidth, DEFAULT_SETTINGS.sideWidth),
       sideHeight: readSize(parsed.sideHeight, DEFAULT_SETTINGS.sideHeight),
-      locked: parsed.locked ?? DEFAULT_SETTINGS.locked,
+      locked: readBoolean(parsed.locked, DEFAULT_SETTINGS.locked),
       layer: parseKmoniLayer(parsed.layer) ?? DEFAULT_SETTINGS.layer,
       soundSeconds: clampSoundSeconds(parsed.soundSeconds ?? DEFAULT_SETTINGS.soundSeconds),
       flashSeconds: clampFlashSeconds(parsed.flashSeconds ?? DEFAULT_SETTINGS.flashSeconds),
@@ -166,9 +168,14 @@ function readStored(storage: Storage | null): Settings {
   }
 }
 
-function save(settings: Settings): void {
+/**
+ * 読み込みと同じ注入 storage へ書く (読み書きの非対称を避ける)。
+ * storage が無い環境 (safeStorage() が null を返す等) では書き込みを試みない。
+ */
+function save(storage: Storage | null, settings: Settings): void {
+  if (!storage) return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    storage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
     // 保存できなくても表示は続ける
   }
@@ -180,6 +187,15 @@ function readHome(value: Partial<HomeLocation> | undefined): HomeLocation | null
   if (typeof lat !== 'number' || typeof lon !== 'number') return null;
   if (!isLat(lat) || !isLon(lon)) return null;
   return { lat, lon };
+}
+
+/**
+ * 壊れた JSON で真偽値であるべき項目が別の型 (文字列等) になっていても
+ * 既定値へ戻す。`locked` が truthy な文字列だと地図操作が永久に無効になる、
+ * といった静かな不具合を防ぐ。
+ */
+function readBoolean(value: boolean | undefined, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function readEewRadiusKm(value: number | undefined): number {

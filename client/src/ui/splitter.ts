@@ -26,6 +26,7 @@ export interface SplitterDeps {
  */
 export class Splitter {
   private dragging = false;
+  private locked = false;
 
   constructor(private readonly deps: SplitterDeps) {
     const { handle } = deps;
@@ -53,9 +54,22 @@ export class Splitter {
     }
   }
 
-  /** キオスク運用では動かせなくする */
+  /**
+   * キオスク運用では動かせなくする。
+   *
+   * pointer-events: none (styles.css) はポインタ操作を止めるだけで、
+   * tabindex が残っているとキーボードでフォーカスして矢印キーで動かせてしまう。
+   * ロック中は tabindex を外してフォーカスできなくし、念のため key() 側でも弾く。
+   */
   setLocked(locked: boolean): void {
+    this.locked = locked;
     this.deps.handle.classList.toggle('split--locked', locked);
+    if (locked) {
+      this.deps.handle.blur();
+      this.deps.handle.removeAttribute('tabindex');
+    } else {
+      this.deps.handle.setAttribute('tabindex', '0');
+    }
   }
 
   /** いま上下に分かれているか (styles.css のメディアクエリと同じ判定) */
@@ -97,6 +111,7 @@ export class Splitter {
   }
 
   private key(ev: KeyboardEvent): void {
+    if (this.locked) return;
     const step = keyStep(ev.key, this.stacked);
     if (step === 0) return;
     const rect = this.deps.container.getBoundingClientRect();

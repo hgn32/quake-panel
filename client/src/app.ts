@@ -90,6 +90,8 @@ export class App {
   private testFlashTimer: number | null = null;
   private viewSaveTimer: number | null = null;
   private sideSaveTimer: number | null = null;
+  /** 利用地ピック中のセッションを丸ごと破棄する関数。再入したときに前回分を必ず片付けるために使う。 */
+  private homePickCancel: (() => void) | null = null;
 
   constructor() {
     this.alert = new AlertPresenter(requireElement('flash'));
@@ -325,7 +327,12 @@ export class App {
 
   private applySettings(patch: Partial<Settings>): void {
     const before = this.settings;
-    this.settings = this.store.update(patch);
+    // 保留中の遅延保存 (地図の view / 境目の幅高さ) をここで確定させる。
+    // 放置すると、後から発火したタイマーが今回の patch を古い値で上書きしたり
+    // (view)、逆にタイマー待ちの未保存値がここでの store.update により
+    // メモリ上で巻き戻ったりする (side) ため、必ず patch より先に取り込む。
+    const pending = this.flushPendingSaves();
+    this.settings = this.store.update({ ...pending, ...patch });
     this.alert.audio.setVolume(this.settings.volume);
     this.mapView.setOptions({
       view: this.settings.view,
@@ -413,6 +420,10 @@ export class App {
    * 押した瞬間に保存されると、選べたのか・選び直せるのかが分からない。
    */
   private startHomePick(): void {
+    // ピックバー表示中でも設定は開けるため、再入で前回分が残らないよう
+    // まず前回のセッションを破棄する (取消扱いでマーカーも元へ戻す)。
+    if (this.homePickCancel) this.homePickCancel();
+
     const bar = requireElement('map-pick');
     const value = requireElement('map-pick-value');
     const okButton = requireElement<HTMLButtonElement>('map-pick-ok');
@@ -426,6 +437,7 @@ export class App {
       document.removeEventListener('keydown', onKey);
       okButton.removeEventListener('click', onOk);
       cancelButton.removeEventListener('click', onCancel);
+      this.homePickCancel = null;
     };
     const onOk = (): void => {
       if (!picked) return;
@@ -439,6 +451,9 @@ export class App {
       this.mapView.setOptions({ home: before });
     };
     const onKey = (ev: KeyboardEvent): void => {
+      // 設定モーダルの入力欄などにフォーカスがあるときの Enter/Escape はそちらの操作なので、
+      // ピックの決定・取消として誤爆させない。
+      if (ev.target instanceof HTMLElement && isFormField(ev.target)) return;
       if (ev.key === 'Escape') onCancel();
       if (ev.key === 'Enter') onOk();
     };
@@ -449,6 +464,7 @@ export class App {
     document.addEventListener('keydown', onKey);
     okButton.addEventListener('click', onOk);
     cancelButton.addEventListener('click', onCancel);
+    this.homePickCancel = onCancel;
 
     this.mapView.startPick((location) => {
       picked = { lat: round3(location.lat), lon: round3(location.lon) };
@@ -484,6 +500,33 @@ export class App {
       this.viewSaveTimer = null;
       this.settings = this.store.update({ view });
     }, 400);
+  }
+
+  /**
+   * 遅延保存タイマー (view / side) が保留中なら、そのタイマーを止めて
+   * 「いまメモリ上にある最新値」を patch として取り出す。
+   *
+   * 呼び出し元 (applySettings) はこれを自分の patch より先に store.update へ渡すことで、
+   * - 保留中の view があるのに他のボタンで view を変えても、後からタイマーが古い view で
+   *   上書きしない (view は pending の後に patch が乗るので新しい値が勝つ)
+   * - 保留中の side (境目のドラッグ幅) があるときに他の設定を変えても、
+   *   store.update がまだ保存されていない side を忘れて巻き戻さない
+   * の両方を防ぐ。
+   */
+  private flushPendingSaves(): Partial<Settings> {
+    const pending: Partial<Settings> = {};
+    if (this.viewSaveTimer !== null) {
+      window.clearTimeout(this.viewSaveTimer);
+      this.viewSaveTimer = null;
+      pending.view = this.settings.view;
+    }
+    if (this.sideSaveTimer !== null) {
+      window.clearTimeout(this.sideSaveTimer);
+      this.sideSaveTimer = null;
+      pending.sideWidth = this.settings.sideWidth;
+      pending.sideHeight = this.settings.sideHeight;
+    }
+    return pending;
   }
 
   private startClock(): void {
@@ -586,6 +629,7 @@ export class App {
     if (this.cursorTimer !== null) window.clearTimeout(this.cursorTimer);
     if (this.testFlashTimer !== null) window.clearTimeout(this.testFlashTimer);
     if (this.viewSaveTimer !== null) window.clearTimeout(this.viewSaveTimer);
+    if (this.sideSaveTimer !== null) window.clearTimeout(this.sideSaveTimer);
     this.connection.stop();
     this.frames.dispose();
     this.mapView.dispose();
@@ -596,4 +640,9 @@ export class App {
 /** 緯度経度は 3 桁もあれば十分 (約 100m)。無駄に長い値を保存しない。 */
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+/** 文字入力を受ける要素か (document 全体の keydown ショートカットが誤爆しないようにするため) */
+function isFormField(el: HTMLElement): boolean {
+  return el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
 }

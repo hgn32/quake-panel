@@ -10,6 +10,19 @@ export interface FrameImages {
 }
 
 /**
+ * 1 フレーム取得のタイムアウト (ms)。
+ *
+ * サーバーはフレームを毎秒配る (idleFrameIntervalMs / activeFrameIntervalMs の
+ * 既定 1000ms、server/src/config.ts) が、キャッシュに無いタイムスタンプは
+ * サーバーが上流 (kmoni) まで取りに行くため、サーバー既定の上流タイムアウト
+ * (KMONI_REQUEST_TIMEOUT_MS 既定 4000ms) までは正常に時間がかかりうる。
+ * それより短いタイムアウトだと成功するはずの取得までハング扱いで捨てて
+ * しまうため、余裕を見て 6 秒とする。これを超えたら abort し、`loading` を
+ * 解放して次のフレーム要求で復帰できるようにする (下記クラスコメント参照)。
+ */
+const FETCH_TIMEOUT_MS = 6000;
+
+/**
  * 新フレーム通知を受けて画像を取りに行く層。
  *
  * WS でバイナリを流さず HTTP で取りに行くのは、キャッシュ制御とデバッグが
@@ -17,6 +30,7 @@ export interface FrameImages {
  * 24 時間稼働でじわじわ壊れる。
  *   - 取得が間に合わないときは古い要求を捨てる (積まない)
  *   - ImageBitmap は差し替え時に必ず close() する
+ *   - 取得がハングしても FETCH_TIMEOUT_MS で必ず解放する (loading を握ったままにしない)
  */
 export class FrameStream {
   private current: FrameImages | null = null;
@@ -76,8 +90,10 @@ export class FrameStream {
     this.inflight?.abort();
     const controller = new AbortController();
     this.inflight = controller;
+    // ハングして戻ってこない取得の保険。詳細は FETCH_TIMEOUT_MS のコメント。
+    const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    return Promise.all([
+    return Promise.allSettled([
       loadBitmap(resolveUrl(ENDPOINTS.frame(this.layer, notice.timestamp)), controller.signal),
       notice.layers.psWave
         ? loadBitmap(resolveUrl(ENDPOINTS.psWave(notice.timestamp)), controller.signal)
@@ -86,22 +102,29 @@ export class FrameStream {
         ? loadBitmap(resolveUrl(ENDPOINTS.estShindo(notice.timestamp)), controller.signal)
         : Promise.resolve(null),
     ])
-      .then(([realtime, psWave, estShindo]) => {
-        if (controller.signal.aborted) {
+      .then(([realtimeResult, psWaveResult, estShindoResult]) => {
+        // allSettled なので個々の失敗 (中断・HTTP エラー等) で全体が reject
+        // することはない。失敗した分は settledBitmap が null を返す。
+        const realtime = settledBitmap(realtimeResult);
+        const psWave = settledBitmap(psWaveResult);
+        const estShindo = settledBitmap(estShindoResult);
+
+        if (controller.signal.aborted || !realtime) {
+          // 採用しない (中断された・realtime が取れなかった) 場合は、
+          // 生成済みの ImageBitmap を取りこぼさず必ず閉じる (リーク防止)。
+          // 1 フレームの取りこぼし自体は次の通知で回復するので、ここでは
+          // それ以上のことはしない。
           closeAll(realtime, psWave, estShindo);
           return;
         }
-        if (!realtime) return;
 
         const next: FrameImages = { notice, realtime, psWave, estShindo };
         this.release(this.current);
         this.current = next;
         this.onFrame(next);
       })
-      .catch(() => {
-        // 1 フレームの取りこぼしは次の通知で回復するので、ここでは何もしない
-      })
       .then(() => {
+        window.clearTimeout(timeout);
         if (this.inflight === controller) this.inflight = null;
       });
   }
@@ -114,6 +137,11 @@ export class FrameStream {
 
 function closeAll(...bitmaps: Array<ImageBitmap | null>): void {
   bitmaps.forEach((bitmap) => bitmap?.close());
+}
+
+/** Promise.allSettled の結果から、取得できていれば bitmap を、失敗していれば null を返す */
+function settledBitmap(result: PromiseSettledResult<ImageBitmap | null>): ImageBitmap | null {
+  return result.status === 'fulfilled' ? result.value : null;
 }
 
 function loadBitmap(url: string, signal: AbortSignal): Promise<ImageBitmap | null> {

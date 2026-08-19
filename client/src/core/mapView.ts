@@ -140,6 +140,9 @@ export class MapView {
     this.canvas.addEventListener('pointermove', this.handlePointerMove);
     this.canvas.addEventListener('pointerup', this.handlePointerUp);
     this.canvas.addEventListener('pointercancel', this.handlePointerUp);
+    // capture が何らかの理由で失われた場合の保険。無いと pointers に
+    // 残留したままになりうる (§handlePointerDown のコメント参照)。
+    this.canvas.addEventListener('lostpointercapture', this.handlePointerUp);
     this.canvas.addEventListener('contextmenu', this.handleContextMenu);
   }
 
@@ -149,6 +152,7 @@ export class MapView {
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
     this.canvas.removeEventListener('pointerup', this.handlePointerUp);
     this.canvas.removeEventListener('pointercancel', this.handlePointerUp);
+    this.canvas.removeEventListener('lostpointercapture', this.handlePointerUp);
     this.canvas.removeEventListener('contextmenu', this.handleContextMenu);
   }
 
@@ -184,6 +188,11 @@ export class MapView {
   private readonly handlePointerDown = (ev: PointerEvent): void => {
     if (ev.button !== 0) return;
     this.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    // 暗黙のキャプチャが無い環境でも、canvas の外で指を離したときに
+    // pointerup を確実に受け取れるよう明示的に capture する。
+    // 1 本目だけ capture すると、2 本目 (ピンチ) を外で離したときに
+    // pointers に残留し、以後ずっとピンチ扱いのまま固まってしまう。
+    this.canvas.setPointerCapture(ev.pointerId);
     if (this.pointers.size >= 2) {
       // 2 本目が触れたらピンチ。1 本指のスクロールは止める。
       this.drag = null;
@@ -191,7 +200,6 @@ export class MapView {
       return;
     }
     this.drag = { pointerId: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: 0 };
-    this.canvas.setPointerCapture(ev.pointerId);
   };
 
   /** 2 本の指の間隔。2 本触れていなければ null。 */
@@ -265,8 +273,21 @@ export class MapView {
     if (this.options.interactive) ev.preventDefault();
   };
 
+  /**
+   * 画面のレイアウトが確定しているか。
+   *
+   * `attachInteraction()` はコンストラクタで呼ばれるが、`cssSize` は
+   * `init()` 経由の `resize()` まで {0,0} のまま。この窓でホイール・ピンチ・
+   * ドラッグを受け付けると 0 除算 (scale=0) で表示位置が (0,0) に飛び、
+   * それがそのまま永続化されてしまうため、確定するまで操作を無視する。
+   */
+  private hasLayout(): boolean {
+    return this.cssSize.width > 0 && this.cssSize.height > 0;
+  }
+
   /** 画面上の一点を動かさずに拡大縮小する */
   private zoomAt(clientX: number, clientY: number, factor: number): void {
+    if (!this.hasLayout()) return;
     const rect = this.canvas.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
@@ -287,6 +308,7 @@ export class MapView {
   }
 
   private panBy(dx: number, dy: number): void {
+    if (!this.hasLayout()) return;
     if (dx === 0 && dy === 0) return;
     this.commitView({
       ...this.options.view,

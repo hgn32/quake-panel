@@ -42,10 +42,10 @@ export interface SettingsPanelDeps {
   onChange: (patch: Partial<Settings>) => void;
   /** 音と画面明滅の両方を出すテスト */
   onTest: () => void;
-  /** デモ再生の発火。実行が確定した後に呼ばれる */
-  onDemo: (scenario: DemoScenario) => void;
-  /** デモ停止の発火。確認なしで即座に呼ばれる */
-  onDemoStop: () => void;
+  /** デモ再生の発火。実行が確定した後に呼ばれる。送信できたか (接続断なら false) を返す */
+  onDemo: (scenario: DemoScenario) => boolean;
+  /** デモ停止の発火。確認なしで即座に呼ばれる。送信できたか (接続断なら false) を返す */
+  onDemoStop: () => boolean;
   /** 地図をクリックして利用地を選ぶモードに入る */
   onPickHome: () => void;
   /** ブラウザの位置情報が使えるか (HTTPS でないと使えないのでボタンごと隠す) */
@@ -69,6 +69,8 @@ export class SettingsPanel {
   private snapshot: Settings | null = null;
   /** 「実行する/やめる」の確認待ちになっているシナリオ。null なら通常表示。 */
   private pendingDemo: DemoScenario | null = null;
+  /** デモ操作が送れなかったときの案内文。null なら非表示。 */
+  private demoNotice: string | null = null;
 
   constructor(private readonly deps: SettingsPanelDeps) {
     deps.openButton.addEventListener('click', () => this.open());
@@ -85,6 +87,7 @@ export class SettingsPanel {
   open(): void {
     this.snapshot = { ...this.deps.getSettings() };
     this.pendingDemo = null;
+    this.demoNotice = null;
     this.render();
     this.deps.modal.hidden = false;
   }
@@ -128,7 +131,7 @@ export class SettingsPanel {
       this.section(
         '利用地',
         '地図の初期位置と、地震速報・津波・履歴の「自分に関わるか」の判定に使います。',
-        this.homeRow(settings),
+        this.homeRow(),
       ),
       this.section(
         'リアルタイム表示',
@@ -199,8 +202,12 @@ export class SettingsPanel {
         '履歴パネル',
         '気象庁発表の事後の地震情報です。表示を絞るだけで、音・明滅は出しません。',
         this.quakeFilterRow(settings),
-        this.numberRow('履歴の表示件数', settings.historyCount, 3, 12, (value) =>
-          this.deps.onChange({ historyCount: value }),
+        this.numberRow(
+          '履歴の表示件数',
+          () => this.deps.getSettings().historyCount,
+          3,
+          12,
+          (value) => this.deps.onChange({ historyCount: value }),
         ),
       ),
       // EEW 専用ではなく津波の音・明滅にも共通する章なので「音と明滅」という章名にする
@@ -263,6 +270,10 @@ export class SettingsPanel {
    * ボタンを押しても即発火はさせず、いったん行内を警告表示に切り替えて
    * 「実行する」を押させてから初めて送信する (window.confirm は使わない)。
    */
+  /** 接続していないときの案内文。「押した＝効いた」と誤認させないための文言。 */
+  private static readonly DEMO_DISCONNECTED_NOTICE =
+    'サーバーに接続していないため送れませんでした。接続が戻ってからもう一度お試しください。';
+
   private demoRow(): HTMLElement {
     if (this.pendingDemo) {
       const scenario = this.pendingDemo;
@@ -284,9 +295,15 @@ export class SettingsPanel {
             { class: 'settings__options' },
             this.button('実行する', () => {
               this.pendingDemo = null;
-              // 明滅は画面全体に出るので、確認できるよう設定画面を閉じる (テストボタンと同じ流儀)
-              this.close();
-              this.deps.onDemo(scenario);
+              const sent = this.deps.onDemo(scenario);
+              if (sent) {
+                this.demoNotice = null;
+                // 明滅は画面全体に出るので、確認できるよう設定画面を閉じる (テストボタンと同じ流儀)
+                this.close();
+              } else {
+                this.demoNotice = SettingsPanel.DEMO_DISCONNECTED_NOTICE;
+                this.render();
+              }
             }),
             this.button('やめる', () => {
               this.pendingDemo = null;
@@ -297,20 +314,33 @@ export class SettingsPanel {
       );
     }
 
+    const notice = this.demoNotice
+      ? h('p', { class: 'settings__warning', text: this.demoNotice })
+      : null;
     return this.row(
       'デモ再生',
       '実際の電文と同じ形のデモを全端末に流します。実発生時はデモを即中止して本物を優先します。' +
         '「停止」で進行中のデモを即座に消せます。',
       h(
         'div',
-        { class: 'settings__options' },
-        ...DEMO_SCENARIOS.map((scenario) =>
-          this.button(scenario.label, () => {
-            this.pendingDemo = scenario.value;
+        { class: 'settings__stack' },
+        h(
+          'div',
+          { class: 'settings__options' },
+          ...DEMO_SCENARIOS.map((scenario) =>
+            this.button(scenario.label, () => {
+              this.pendingDemo = scenario.value;
+              this.demoNotice = null;
+              this.render();
+            }),
+          ),
+          this.button('停止', () => {
+            const sent = this.deps.onDemoStop();
+            this.demoNotice = sent ? null : SettingsPanel.DEMO_DISCONNECTED_NOTICE;
             this.render();
           }),
         ),
-        this.button('停止', () => this.deps.onDemoStop()),
+        notice,
       ),
     );
   }
@@ -477,12 +507,18 @@ export class SettingsPanel {
    * 自動取得はどれも「入力欄へ入れる」までで、確定は「保存」に任せる
    * (取消で開いた時点へ戻せる)。
    */
-  private homeRow(settings: Settings): HTMLElement {
-    const lat = this.coordInput(settings.home.lat, -90, 90, (value) =>
-      this.deps.onChange({ home: { ...this.deps.getSettings().home, lat: value } }),
+  private homeRow(): HTMLElement {
+    const lat = this.coordInput(
+      () => this.deps.getSettings().home.lat,
+      -90,
+      90,
+      (value) => this.deps.onChange({ home: { ...this.deps.getSettings().home, lat: value } }),
     );
-    const lon = this.coordInput(settings.home.lon, -180, 180, (value) =>
-      this.deps.onChange({ home: { ...this.deps.getSettings().home, lon: value } }),
+    const lon = this.coordInput(
+      () => this.deps.getSettings().home.lon,
+      -180,
+      180,
+      (value) => this.deps.onChange({ home: { ...this.deps.getSettings().home, lon: value } }),
     );
     const pick = this.button('地図から選ぶ', () => {
       this.close();
@@ -623,8 +659,14 @@ export class SettingsPanel {
     );
   }
 
+  /**
+   * 緯度・経度の入力欄。
+   *
+   * 空欄や不正値は「消しただけ」で気付きにくいので設定を変えず、
+   * 表示だけを最新の有効な設定値 (レンダー時点の値ではなく、いま効いている値) へ戻す。
+   */
   private coordInput(
-    value: number,
+    getValue: () => number,
     min: number,
     max: number,
     onChange: (value: number) => void,
@@ -636,11 +678,12 @@ export class SettingsPanel {
       max: String(max),
       step: '0.001',
     });
-    input.value = String(value);
+    input.value = String(getValue());
     input.addEventListener('change', () => {
-      const next = Number(input.value);
-      if (!Number.isFinite(next) || next < min || next > max) {
-        input.value = String(value);
+      const raw = input.value.trim();
+      const next = Number(raw);
+      if (raw === '' || !Number.isFinite(next) || next < min || next > max) {
+        input.value = String(getValue());
         return;
       }
       onChange(next);
@@ -717,18 +760,31 @@ export class SettingsPanel {
     return this.row(label, hint, h('div', { class: 'settings__options' }, input, readout));
   }
 
+  /**
+   * クランプ付きの数値入力。
+   *
+   * 範囲外の値はクランプして入力欄へ反映し、空欄・非数値は設定を変えず
+   * 表示だけをいま効いている値へ戻す (空欄が最小値として保存されるのを防ぐ)。
+   */
   private numberRow(
     label: string,
-    value: number,
+    getValue: () => number,
     min: number,
     max: number,
     onInput: (value: number) => void,
   ): HTMLElement {
     const input = h('input', { type: 'number', min: String(min), max: String(max) });
-    input.value = String(value);
+    input.value = String(getValue());
     input.addEventListener('change', () => {
-      const next = Number(input.value);
-      if (Number.isFinite(next)) onInput(Math.min(Math.max(next, min), max));
+      const raw = input.value.trim();
+      const next = Number(raw);
+      if (raw === '' || !Number.isFinite(next)) {
+        input.value = String(getValue());
+        return;
+      }
+      const clamped = Math.min(Math.max(next, min), max);
+      input.value = String(clamped);
+      onInput(clamped);
     });
     return this.row(label, null, input);
   }
