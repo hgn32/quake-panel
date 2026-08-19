@@ -48,15 +48,25 @@ function main(): Promise<void> {
   const httpServer = createHttpServer(config, hub, frames);
   const wsServer = new ClientWebSocketServer(httpServer, config, hub, demo);
 
-  // 終了処理は `return` より前に定義する。`registerShutdown` は listen 後
-  // (= main が return した後) に呼ばれるので、`return` の後ろに置くと
-  // `shutdown` が初期化されないまま参照され、SIGTERM/SIGINT で
-  // ReferenceError になって停止できなくなる (ポートが掴まれたままになる)。
+  // 終了処理の定義とハンドラ登録は、起動シーケンス (時刻同期・履歴取得。
+  // 合わせて最長十数秒かかりうる) に入る前、各コンポーネントの生成が
+  // 終わった直後にここで済ませる。以前は `registerShutdown` を起動シーケンス
+  // 完了後 (listen 成功後) に呼んでいたが、それだと起動の途中で SIGTERM/SIGINT
+  // を受けたときにハンドラが未登録のままで、既定動作 (即死) になって
+  // graceful shutdown が一切走らなかった。ここで参照する各コンポーネントは
+  // すべてこの時点で生成済みなので、まだ `start()` していない状態で `stop()`
+  // を呼んでも例外にはならない (調査済み)。listen 前に `httpServer.close()`
+  // を呼んでもコールバックは呼ばれる (`ERR_SERVER_NOT_RUNNING` が引数に
+  // 渡ってくるだけ) ので、終了処理はどの段階でシグナルを受けても完走する。
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info(`received ${signal}, shutting down`);
+    // 接続が残っていても一定時間で必ず落とす (コンテナ再起動を待たせない)。
+    // `wss.close()` 等のコールバックが何らかの理由で返らなくても、この
+    // フォールバックだけは各 stop() 呼び出しより前に必ず仕込んでおく。
+    setTimeout(() => process.exit(0), 5000).unref();
     clock.stop();
     frames.stop();
     kmoniEew.stop();
@@ -65,8 +75,6 @@ function main(): Promise<void> {
     p2p.stop();
     void wsServer.stop().then(() => {
       httpServer.close(() => process.exit(0));
-      // 接続が残っていても一定時間で必ず落とす (コンテナ再起動を待たせない)
-      setTimeout(() => process.exit(0), 5000).unref();
     });
   };
   const registerShutdown = (): void => {
@@ -76,6 +84,7 @@ function main(): Promise<void> {
       log.error(`unhandled rejection: ${describeError(reason)}`);
     });
   };
+  registerShutdown();
 
   // 時刻同期だけは先に済ませる。ここがずれていると最初のフレーム取得が全部 404 になる。
   return clock
@@ -97,7 +106,6 @@ function main(): Promise<void> {
     .then(() => {
       log.info(`listening on http://${config.host}:${config.port} (static: ${config.staticDir})`);
       log.info('データ提供: 防災科学技術研究所 強震モニタ / P2P地震情報');
-      registerShutdown();
     });
 }
 

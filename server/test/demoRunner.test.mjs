@@ -329,6 +329,46 @@ describe('デモ再生 (DemoRunner)', () => {
     assert.equal(eewEvents[0].eew && eewEvents[0].eew.id, REAL_EEW.id);
   });
 
+  it('【回帰】実津波が起動時に seedTsunami で入っているだけでも、津波デモの trigger() が拒否される', () => {
+    mock.timers.enable();
+    const hub = makeHub();
+    // p2p.seedHistory() → hub.seedTsunami() を模す。seedTsunami はイベントを emit しないため、
+    // DemoRunner が起動時の onHubEvent キャッシュだけに頼っていると検知できない
+    // (これが実津波警報をデモの解除報で消してしまうバグの原因だった)。
+    hub.seedTsunami({
+      id: '20260817111000',
+      issuedAt: '2026-08-17T02:10:00.000Z',
+      cancelled: false,
+      areas: [
+        {
+          name: '宮崎県',
+          grade: 'Warning',
+          immediate: true,
+          firstHeightCondition: null,
+          firstHeightArrivalTime: null,
+          maxHeightDescription: '3m',
+          maxHeightValue: 3,
+          isHome: false,
+        },
+      ],
+      affectsHome: false,
+      receivedAt: '2026-08-17T02:10:00.500Z',
+    });
+    const events = attachRecorder(hub);
+    // Hub 構築後にコンストラクタが呼ばれる、実運用と同じ順序 (実津波が先に入っている状態)。
+    const runner = new DemoRunner(hub);
+
+    runner.trigger('tsunami');
+    mock.timers.tick(60_000);
+
+    // デモの津波イベントは一切配信されず (trigger() がガードで見送るため)、
+    // 実津波の現況もそのまま (解除されていない) はず。
+    assert.equal(events.filter((e) => e.type === 'tsunami').length, 0, '実津波があるのにデモの津波が配信されている');
+    const snapshot = hub.getSnapshot();
+    assert.equal(snapshot.tsunami?.cancelled, false, '実津波が解除されてしまっている');
+    assert.equal(snapshot.tsunami?.areas.length, 1, '実津波の areas が消されてしまっている');
+  });
+
   it('stop(): 何も進行していない状態で呼んでも例外にならず、何も配信されない', () => {
     mock.timers.enable();
     const hub = makeHub();

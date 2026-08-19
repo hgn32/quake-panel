@@ -33,6 +33,31 @@ type BinaryFrame = BinaryResponse;
 /** 端末から要求された指標を、何秒間「見られている」とみなすか */
 const LAYER_ACTIVE_MS = 60_000;
 
+/**
+ * requestImage で受け付けるタイムスタンプの許容範囲 (現在時刻からの差)。
+ *
+ * - 過去方向: prune() のキャッシュ保持上限 (frameCacheSize*3、既定 90 件) は全レイヤ
+ *   合算の件数であり、既定の取得間隔 (1 秒) 換算でもキャッシュに残っているのはせいぜい
+ *   数十秒〜数分程度。それより古い時刻は、当ワーカーのキャッシュにまず残っていない
+ *   (=どのみち上流へ取りに行くしかない) ので、妥当な上限として 5 分を採る。
+ * - 未来方向: 端末側の時計が多少進んでいる分は許容したいが、本来ありえない未来の
+ *   画像を無制限に要求されると (上流には存在しないので) 毎回 404 を引くだけになる。
+ *   NTP のずれとして現実的な範囲を見て 15 秒とする。
+ *
+ * これを外れるタイムスタンプは、形式が正しくても上流へは取りに行かず拒否する
+ * (毎秒起こりうるクライアントの時計ズレ・スクラブ操作による上流への負荷を抑える)。
+ */
+const REQUEST_PAST_LIMIT_MS = 5 * 60 * 1000;
+const REQUEST_FUTURE_LIMIT_MS = 15 * 1000;
+
+/** 14 桁形式かつ実在する日時で、かつ現在時刻から見て妥当な範囲内か */
+export function isRequestableTimestamp(timestamp: string, now: number): boolean {
+  const date = fromKmoniTimestamp(timestamp);
+  if (!date) return false;
+  const diffMs = now - date.getTime();
+  return diffMs <= REQUEST_PAST_LIMIT_MS && diffMs >= -REQUEST_FUTURE_LIMIT_MS;
+}
+
 export interface CachedImage {
   body: Buffer;
   contentType: string;
@@ -98,6 +123,10 @@ export class KmoniFrameWorker {
     if (layer !== this.config.kmoni.layer) this.requestedLayers.set(layer, Date.now());
     const cached = this.getImage(layer, timestamp);
     if (cached) return Promise.resolve(cached);
+    if (!isRequestableTimestamp(timestamp, Date.now())) {
+      log.debug(`${layer} の要求タイムスタンプ ${timestamp} が範囲外のため上流へ取りに行きません`);
+      return Promise.resolve(null);
+    }
     return this.fetchLayer(layer, timestamp);
   }
 
@@ -235,7 +264,7 @@ export class KmoniFrameWorker {
   private publishFrame(timestamp: string, layers: FrameNotice['layers']): void {
     this.lastTimestamp = timestamp;
     this.hub.markSuccess('kmoniImage');
-    this.prune();
+    // prune() は store() に一本化済み (このフレーム取得でも複数回 store() を呼んでいるため)
 
     const frameTime = fromKmoniTimestamp(timestamp);
     const notice: FrameNotice = {
@@ -262,6 +291,11 @@ export class KmoniFrameWorker {
       });
   }
 
+  /**
+   * キャッシュへの書き込みはここに一本化する。publishFrame 経由 (毎秒の本体取得) だけでなく
+   * requestImage 経由 (端末からの任意タイムスタンプ要求) で入った画像にも prune() を効かせ、
+   * kmoni 障害中でも無制限に積み上がらないようにする。
+   */
   private store(layer: FrameLayer, timestamp: string, body: Buffer, contentType: string): void {
     this.cache.set(cacheKey(layer, timestamp), {
       body,
@@ -269,6 +303,7 @@ export class KmoniFrameWorker {
       timestamp,
       fetchedAt: Date.now(),
     });
+    this.prune();
   }
 
   /** メモリを一定に保つ。72 時間ソーク条件 (§6) の要。 */

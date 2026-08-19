@@ -91,8 +91,6 @@ export class DemoRunner {
   private timers: NodeJS.Timeout[] = [];
   /** 本物の (demo- でない) EEW が現在表示中か */
   private realEewActive: boolean;
-  /** 本物の (demo- でない) 津波予報が現在表示中 (解除されていない) か */
-  private realTsunamiActive: boolean;
   /** いま画面に出ているはずのデモ EEW。null 配信済み/未開始なら null。 */
   private onAirEew: EewState | null = null;
   /** いま画面に出ているはずのデモ津波予報。解除済み/未開始なら null。 */
@@ -103,9 +101,24 @@ export class DemoRunner {
     private readonly onEewEvent?: (event: EewEvent) => void,
   ) {
     this.realEewActive = hub.getEew() !== null;
-    const tsunami = hub.getSnapshot().tsunami;
-    this.realTsunamiActive = tsunami !== null && !tsunami.cancelled;
     hub.on('event', (event) => this.onHubEvent(event));
+  }
+
+  /**
+   * 本物の (demo- でない) 津波予報が現在表示中 (解除されていない) か。
+   *
+   * キャッシュせず、呼び出しの都度 hub.getSnapshot().tsunami を見に行く。
+   * 実津波は起動時に p2p.seedHistory() → hub.seedTsunami() で読み込まれるが、
+   * seedTsunami はイベントを emit しないため、これを onHubEvent 側のキャッシュ更新
+   * だけに頼ると起動直後は必ず false のままになってしまう (実津波警報が出ている間に
+   * サーバーを再起動して津波デモを発火すると、trigger() のガードを素通りしてしまい、
+   * デモ終了時の解除報で実津波警報が全端末から消えるバグの原因だった)。
+   * hub の現況を都度読むことで、seedTsunami 経由・publishTsunami 経由のどちらで
+   * 入った実津波も正しく検知できる。
+   */
+  private isRealTsunamiActive(): boolean {
+    const tsunami = this.hub.getSnapshot().tsunami;
+    return tsunami !== null && !tsunami.cancelled;
   }
 
   /** 設定画面のボタンから呼ばれる。scenario は JSON 由来なので実行時に検証する。 */
@@ -114,7 +127,7 @@ export class DemoRunner {
       log.warn(`未知のデモシナリオを無視しました: ${scenario}`);
       return;
     }
-    if (scenario === 'tsunami' ? this.realTsunamiActive : this.realEewActive) {
+    if (scenario === 'tsunami' ? this.isRealTsunamiActive() : this.realEewActive) {
       log.warn(`実イベントが進行中のため、デモ (${scenario}) の開始を見送りました`);
       return;
     }
@@ -181,7 +194,6 @@ export class DemoRunner {
     }
     if (event.type === 'tsunami') {
       if (isDemoEventId(event.tsunami.id)) return;
-      this.realTsunamiActive = !event.tsunami.cancelled;
       if (!event.tsunami.cancelled && this.timers.length > 0) {
         log.info('実際の津波予報を受信したため、進行中のデモを中止します');
         this.cancelTimers();

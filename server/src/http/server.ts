@@ -33,11 +33,26 @@ export function createHttpServer(
   const staticRoot = resolveStaticRoot(import.meta.url, config.staticDir);
 
   return createServer((req, res) => {
-    handle(req, res).catch((error) => {
-      log.error(`request failed: ${describeError(error)}`);
-      if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
-      if (!res.writableEnded) res.end('internal error');
-    });
+    // `handle` は Promise を返す前提だが、内部のどこかが同期的に throw すると
+    // `handle(req, res).catch(...)` という書き方ではその throw を拾えない
+    // (呼び出し自体が例外で止まり、返り値の `.catch` に辿り着かない)。
+    // `Promise.resolve().then(() => handle(req, res))` を挟めば、同期 throw も
+    // マイクロタスク内での例外として Promise の reject に変換されるので、
+    // 必ず下の `.catch` で拾える。
+    Promise.resolve()
+      .then(() => handle(req, res))
+      .catch((error) => {
+        log.error(`request failed: ${describeError(error)}`);
+        if (res.headersSent) {
+          // 200 応答と content-length を送信済みの後にここへ来ると、追記は
+          // ERR_HTTP_CONTENT_LENGTH_MISMATCH を誘発するだけなので追記せず、
+          // ソケットごと打ち切る。
+          res.destroy();
+          return;
+        }
+        res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('internal error');
+      });
   });
 
   function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {

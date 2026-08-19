@@ -139,6 +139,39 @@ describe('onEewEvent の kind 判定', () => {
     assert.equal(events[1].kind, 'update');
   });
 
+  it('【回帰】同一内容の続報を繰り返し accept しても update は 1 回だけ (毎秒ポーリングでの webhook 連投を防ぐ)', () => {
+    const { coordinator, events } = makeCoordinator();
+    const report = (reportNumber, announcedAt) => ({
+      id: '20260817111000',
+      reportNumber,
+      alert: 'forecast',
+      isCancel: false,
+      isFinal: false,
+      isTraining: false,
+      hypocenter: { name: '日向灘', lat: 32.3, lon: 131.9, depthKm: 30, magnitude: 5.2 },
+      maxIntensity: 40,
+      originTime: new Date('2026-08-17T02:10:00.000Z'),
+      announcedAt: new Date(announcedAt),
+    });
+    // kmoni EEW は毎秒ポーリングされ、発表中は同一報 (report_num 不変) が何度も届く。
+    coordinator.acceptKmoni(report(2, '2026-08-17T02:10:08.000Z'));
+    coordinator.acceptKmoni(report(2, '2026-08-17T02:10:08.000Z'));
+    coordinator.acceptKmoni(report(2, '2026-08-17T02:10:08.000Z'));
+    assert.equal(events.length, 1, '同一内容なのに update が複数回発火している');
+    assert.equal(events[0].kind, 'new');
+
+    // 内容 (震度) が変われば、同一報番号のままでも update を発火する。
+    const changed = { ...report(2, '2026-08-17T02:10:08.000Z'), maxIntensity: 45 };
+    coordinator.acceptKmoni(changed);
+    assert.equal(events.length, 2, '内容が変わったのに update が発火していない');
+    assert.equal(events[1].kind, 'update');
+
+    // 変化後、再び同一内容で連投しても増えない。
+    coordinator.acceptKmoni(changed);
+    coordinator.acceptKmoni(changed);
+    assert.equal(events.length, 2, '変化後の同一内容でまた update が増えている');
+  });
+
   it('キャンセル報は cancel', () => {
     const { coordinator, events } = makeCoordinator();
     const report = (isCancel, announcedAt) => ({

@@ -75,8 +75,9 @@ export class EewCoordinator {
         : this.pickNewer(incoming);
     if (!merged) return;
 
-    const isNew = !this.current || !isSameEvent(this.current, merged);
-    const cancelRising = merged.isCancel && !this.current?.isCancel;
+    const previous = this.current;
+    const isNew = !previous || !isSameEvent(previous, merged);
+    const cancelRising = merged.isCancel && !previous?.isCancel;
     if (isNew) {
       log.info(
         `EEW ${merged.alert} ${merged.hypocenter.name} M${merged.hypocenter.magnitude ?? '?'} ` +
@@ -91,8 +92,14 @@ export class EewCoordinator {
     this.lastUpdateAt = Date.now();
     this.deps.hub.publishEew(merged);
     this.deps.onActiveChange(true);
+    // kmoni EEW は毎秒ポーリングされ、発表中は同一報でもここまで来る。内容が実質的に
+    // 変わっていないときまで webhook (onEewEvent) へ 'update' を流すと、発表中ずっと
+    // 同一内容を秒間隔で POST し続けることになるため、Hub.hasEewChanged (hub.ts) と
+    // 同じ基準の変化判定を挟んで抑止する。新規発表・キャンセル・内容変化は必ず通知する。
     const kind: EewEventKind = cancelRising ? 'cancel' : isNew ? 'new' : 'update';
-    this.deps.onEewEvent?.({ kind, eew: merged });
+    if (!previous || hasMeaningfulChange(previous, merged)) {
+      this.deps.onEewEvent?.({ kind, eew: merged });
+    }
   }
 
   /**
@@ -118,6 +125,31 @@ export class EewCoordinator {
     this.deps.onActiveChange(false);
     this.deps.onEewEvent?.({ kind: 'expired', eew: expired });
   }
+}
+
+/**
+ * 続報として意味のある差があるか (webhook への 'update' を抑止するための判定)。
+ *
+ * hub.ts の hasEewChanged と同じ基準にすること、という要件があるが hub.ts は
+ * 編集禁止・関数も非公開のため、ここに同等のロジックを複製して持つ。
+ * (フィールドを増減する際は両方を揃えて直すこと)
+ */
+function hasMeaningfulChange(a: EewState, b: EewState): boolean {
+  return (
+    a.id !== b.id ||
+    a.reportNumber !== b.reportNumber ||
+    a.isCancel !== b.isCancel ||
+    a.isFinal !== b.isFinal ||
+    a.alert !== b.alert ||
+    a.maxIntensity !== b.maxIntensity ||
+    a.source !== b.source ||
+    a.hypocenter.name !== b.hypocenter.name ||
+    a.hypocenter.lat !== b.hypocenter.lat ||
+    a.hypocenter.lon !== b.hypocenter.lon ||
+    a.hypocenter.depthKm !== b.hypocenter.depthKm ||
+    a.hypocenter.magnitude !== b.hypocenter.magnitude ||
+    a.regions.length !== b.regions.length
+  );
 }
 
 function timeOf(state: EewState): number {

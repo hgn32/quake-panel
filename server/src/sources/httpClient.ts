@@ -29,12 +29,23 @@ export interface FetchOptions {
   signal?: AbortSignal;
 }
 
-function request(url: string, opts: FetchOptions): Promise<Response> {
+/**
+ * fetch() の Response と、その後始末 (タイマー解除・abort 購読解除) をひとまとめにしたもの。
+ * cleanup はヘッダ受信時点では呼ばない (呼び出し側が本文を読み終えてから呼ぶ)。
+ * こうしないと、ヘッダだけ返して本文を止める上流に対して timeoutMs が効かなくなる
+ * (本文読み取り = res.json()/res.arrayBuffer() が undici 既定の約 300 秒まで pend する)。
+ */
+interface RequestResult {
+  res: Response;
+  cleanup: () => void;
+}
+
+function request(url: string, opts: FetchOptions): Promise<RequestResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('timeout')), opts.timeoutMs);
   const onAbort = (): void => controller.abort(opts.signal?.reason);
   opts.signal?.addEventListener('abort', onAbort, { once: true });
-  // 成否によらずタイマーと購読を必ず外す (finally 相当)
+  // 本文読み取りが終わるまでタイマーと購読を外さない。呼び出し側が cleanup() を呼ぶ。
   const cleanup = (): void => {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onAbort);
@@ -47,10 +58,7 @@ function request(url: string, opts: FetchOptions): Promise<Response> {
     },
     redirect: opts.missingOnRedirect ? 'manual' : 'follow',
   }).then(
-    (res) => {
-      cleanup();
-      return res;
-    },
+    (res) => ({ res, cleanup }),
     (error: Error) => {
       cleanup();
       return Promise.reject(error);
@@ -58,10 +66,23 @@ function request(url: string, opts: FetchOptions): Promise<Response> {
   );
 }
 
+/** 使わない応答の body を読み捨てて接続資源を解放する (404/3xx/エラー応答向け)。 */
+function discardBody(res: Response): Promise<void> {
+  if (!res.body) return Promise.resolve();
+  return res.body.cancel().then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
 export function fetchJson<T>(url: string, opts: FetchOptions): Promise<T> {
-  return request(url, opts).then((res) => {
-    if (!res.ok) return Promise.reject(new HttpError(res.status, url));
-    return res.json() as Promise<T>;
+  return request(url, opts).then(({ res, cleanup }) => {
+    if (!res.ok) {
+      return discardBody(res)
+        .finally(cleanup)
+        .then(() => Promise.reject(new HttpError(res.status, url)));
+    }
+    return res.json().finally(cleanup) as Promise<T>;
   });
 }
 
@@ -74,14 +95,25 @@ export interface BinaryResponse {
 
 /** 画像取得。存在しない (まだ生成されていない) 場合は null を返す。 */
 export function fetchBinary(url: string, opts: FetchOptions): Promise<BinaryResponse | null> {
-  return request(url, { ...opts, missingOnRedirect: opts.missingOnRedirect ?? true }).then((res) => {
-    if (res.status === 404) return null;
-    if (res.status >= 300 && res.status < 400) return null;
-    if (!res.ok) return Promise.reject(new HttpError(res.status, url));
-    return res.arrayBuffer().then((buffer) => ({
-      body: Buffer.from(buffer),
-      contentType: res.headers.get('content-type') ?? 'application/octet-stream',
-      lastModified: res.headers.get('last-modified'),
-    }));
+  return request(url, { ...opts, missingOnRedirect: opts.missingOnRedirect ?? true }).then(({ res, cleanup }) => {
+    if (res.status === 404) {
+      return discardBody(res).finally(cleanup).then(() => null);
+    }
+    if (res.status >= 300 && res.status < 400) {
+      return discardBody(res).finally(cleanup).then(() => null);
+    }
+    if (!res.ok) {
+      return discardBody(res)
+        .finally(cleanup)
+        .then(() => Promise.reject(new HttpError(res.status, url)));
+    }
+    return res
+      .arrayBuffer()
+      .finally(cleanup)
+      .then((buffer) => ({
+        body: Buffer.from(buffer),
+        contentType: res.headers.get('content-type') ?? 'application/octet-stream',
+        lastModified: res.headers.get('last-modified'),
+      }));
   });
 }

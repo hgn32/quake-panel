@@ -33,6 +33,10 @@ export class ClientWebSocketServer {
   ) {
     this.wss = new WebSocketServer({ server, path: ENDPOINTS.ws });
 
+    // 'error' を放置すると Node の既定動作で未処理 'error' としてプロセスごと
+    // 落ちる。ログするだけにして、他のクライアントへの配信は続ける。
+    this.wss.on('error', (error) => log.error(`server error: ${describeError(error)}`));
+
     this.wss.on('connection', (socket, req) => {
       const client: Client = { socket, alive: true };
       this.clients.add(client);

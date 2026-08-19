@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 const MIME: Record<string, string> = {
@@ -47,7 +48,18 @@ export function serveStatic(
   res: ServerResponse,
 ): Promise<boolean> {
   const root = resolve(rootDir);
-  const decoded = decodeURIComponent(urlPath.split('?')[0] ?? '/');
+  // `decodeURIComponent` は不正な %-エンコード (例: `/%zz`) を渡されると同期的に
+  // `URIError` を投げる。ここで捕まえず素通しすると、呼び出し元の
+  // `handle().catch(...)` という Promise チェーンに乗る前に例外が同期伝播し、
+  // uncaughtException でプロセスごと落ちる (実機で確認済み)。
+  // ここで捕まえて 400 を返せば、以後のリクエストにも普通に応答し続けられる。
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(urlPath.split('?')[0] ?? '/');
+  } catch {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end('bad request');
+    return Promise.resolve(true);
+  }
   const relative = normalize(decoded === '/' ? '/index.html' : decoded).replace(/^(\.\.[/\\])+/, '');
   const filePath = join(root, relative);
   // 上位ディレクトリへ抜ける経路は配らない
@@ -66,11 +78,19 @@ export function serveStatic(
         'cache-control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
         'last-modified': info.mtime.toUTCString(),
       });
+      // `stream.pipe(res)` だけだと、クライアントが転送途中で切断したときに
+      // read stream が破棄されず fd が漏れ続け、Promise も settle しないまま
+      // 残ってしまう。`pipeline` なら片方が終了・破棄されたときにもう片方も
+      // 必ず破棄され、結果 (成功でもエラーでも) を必ずコールバックへ渡してくれる。
       return new Promise<boolean>((resolvePromise, reject) => {
         const stream = createReadStream(filePath);
-        stream.on('error', reject);
-        stream.on('end', () => resolvePromise(true));
-        stream.pipe(res);
+        pipeline(stream, res, (error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolvePromise(true);
+        });
       });
     });
 }
