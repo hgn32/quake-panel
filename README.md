@@ -70,14 +70,14 @@ http である混在コンテンツ問題が消える、(c) P2P の接続本数�
 
 ### ディレクトリ
 
-| 場所 | 内容 |
-|---|---|
-| `shared/` | サーバーとクライアントで共有する型・座標変換・震度階級・時刻処理 |
-| `server/` | 取得ワーカー、EEW 統合、HTTP/WebSocket 配信 |
-| `client/` | 描画コア (フレームワーク非依存) と UI シェル (素の TypeScript) |
-| `scripts/` | 上流の実測確認、座標系の較正、背景地図の生成 |
-| `deploy/` | nginx 設定例、キオスク端末の起動スクリプト |
-| `docs/` | 上流エンドポイントの実測結果 |
+| 場所       | 内容                                                             |
+| ---------- | ---------------------------------------------------------------- |
+| `shared/`  | サーバーとクライアントで共有する型・座標変換・震度階級・時刻処理 |
+| `server/`  | 取得ワーカー、EEW 統合、HTTP/WebSocket 配信                      |
+| `client/`  | 描画コア (フレームワーク非依存) と UI シェル (素の TypeScript)   |
+| `scripts/` | 上流の実測確認、座標系の較正、背景地図の生成                     |
+| `deploy/`  | nginx 設定例、キオスク端末の起動スクリプト                       |
+| `docs/`    | 上流エンドポイントの実測結果                                     |
 
 `client/src/core/` は UI に依存しない描画コアで、`client/src/ui/` を
 Preact や React に差し替えても手を入れずに済むようにしてある。
@@ -90,7 +90,7 @@ Preact や React に差し替えても手を入れずに済むようにしてあ
 
 イメージは `release/Dockerfile` 1 本で管理し、`release/build_image.sh` が
 テスト → ビルド → 起動スモークテストまで通す。プロキシ経由でビルドするときは
-`PROXY_URL` / `PROXY_NO_PROXY` を環境変数で渡す。
+`BUILD_PROXY_URL` / `BUILD_NO_PROXY_URL` を環境変数で渡す。
 
 ```bash
 release/build_image.sh
@@ -169,28 +169,28 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 `.env.example` には**既定のままでは困る 3 つ**だけ書いてある。以下はすべて既定で動くので、
 変えたいときだけ `.env` に足す。時刻は環境の `TZ` に関係なく JST 固定で扱う。
 
-| 変数 | 既定 | 説明 |
-|---|---|---|
-| `STATIC_DIR` | `public` | クライアントのビルド成果物の場所。ローカルでは `client/dist` を指す |
-| `KMONI_LAYER` | `acmap` | 地図に出す指標。`acmap` (最大加速度・既定) / `jma` (リアルタイム震度) / `vcmap` (最大速度) / `dcmap` (最大変位)。端末が別の指標を選んだときだけ、その分も追加で取得する |
-| `UPSTREAM_API_PROXY_URL` | なし | 上流 API へプロキシ経由で出るときに設定する。HTTP 取得も WebSocket も同じ値を使う。未設定なら直接接続。標準の `HTTP_PROXY` 等は見ない |
-| `PORT` / `HOST` | `8080` / `0.0.0.0` | 待ち受け |
-| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error`。調査したいときだけ `LOG_LEVEL=debug npm start` |
-| `KMONI_IDLE_FRAME_INTERVAL_SEC` | `1` | 平常時の画像取得間隔 (秒)。負荷を抑えたいなら `2` |
-| `KMONI_ACTIVE_FRAME_INTERVAL_SEC` | `1` | EEW 発表中の画像取得間隔 (秒) |
-| `KMONI_EEW_INTERVAL_MS` | `1000` | EEW JSON のポーリング間隔 |
-| `KMONI_CLOCK_SYNC_INTERVAL_MS` | `60000` | 基準時刻 (`latest.json`) の再同期間隔 |
-| `KMONI_REQUEST_TIMEOUT_MS` | `4000` | 上流 HTTP のタイムアウト |
-| `KMONI_DEGRADE_AFTER_FAILURES` | `5` | 連続失敗が何回で劣化モードに落ちるか |
-| `KMONI_FRAME_CACHE_SIZE` | `30` | 保持するフレーム数 (取りこぼし救済用) |
-| `KMONI_BASE_URL` | `http://www.kmoni.bosai.go.jp` | 上流の宛先。モックサーバーに向けると上流を叩かずに確認できる |
-| `P2P_WS_URL` / `P2P_HISTORY_URL` | `wss://api.p2pquake.net/v2/ws` / `https://api.p2pquake.net/v2/history` | 上流の宛先 |
-| `P2P_RECONNECT_MIN_MS` / `P2P_RECONNECT_MAX_MS` | `1000` / `60000` | 再接続待ちの下限と上限 |
-| `EEW_RETENTION_MS` | `180000` | 続報が途切れてから EEW 表示を消すまで |
-| `EEW_WEBHOOK_URL` | なし | EEW イベントを外部システムへ通知する webhook の POST 先。カンマ区切りで複数指定可。未設定なら無効 |
-| `EEW_WEBHOOK_TIMEOUT_MS` | `5000` | webhook 送信のタイムアウト |
-| `WS_HEARTBEAT_MS` | `30000` | クライアント WS の ping 間隔 |
-| `QUAKE_HISTORY_SIZE` | `12` | 保持する地震情報の件数 |
+| 変数                                            | 既定                                                                   | 説明                                                                                                                                                                    |
+| ----------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STATIC_DIR`                                    | `public`                                                               | クライアントのビルド成果物の場所。ローカルでは `client/dist` を指す                                                                                                     |
+| `KMONI_LAYER`                                   | `acmap`                                                                | 地図に出す指標。`acmap` (最大加速度・既定) / `jma` (リアルタイム震度) / `vcmap` (最大速度) / `dcmap` (最大変位)。端末が別の指標を選んだときだけ、その分も追加で取得する |
+| `UPSTREAM_API_PROXY_URL`                        | なし                                                                   | 上流 API へプロキシ経由で出るときに設定する。HTTP 取得も WebSocket も同じ値を使う。未設定なら直接接続。標準の `HTTP_PROXY` 等は見ない                                   |
+| `PORT` / `HOST`                                 | `8080` / `0.0.0.0`                                                     | 待ち受け                                                                                                                                                                |
+| `LOG_LEVEL`                                     | `info`                                                                 | `debug` / `info` / `warn` / `error`。調査したいときだけ `LOG_LEVEL=debug npm start`                                                                                     |
+| `KMONI_IDLE_FRAME_INTERVAL_SEC`                 | `1`                                                                    | 平常時の画像取得間隔 (秒)。負荷を抑えたいなら `2`                                                                                                                       |
+| `KMONI_ACTIVE_FRAME_INTERVAL_SEC`               | `1`                                                                    | EEW 発表中の画像取得間隔 (秒)                                                                                                                                           |
+| `KMONI_EEW_INTERVAL_MS`                         | `1000`                                                                 | EEW JSON のポーリング間隔                                                                                                                                               |
+| `KMONI_CLOCK_SYNC_INTERVAL_MS`                  | `60000`                                                                | 基準時刻 (`latest.json`) の再同期間隔                                                                                                                                   |
+| `KMONI_REQUEST_TIMEOUT_MS`                      | `4000`                                                                 | 上流 HTTP のタイムアウト                                                                                                                                                |
+| `KMONI_DEGRADE_AFTER_FAILURES`                  | `5`                                                                    | 連続失敗が何回で劣化モードに落ちるか                                                                                                                                    |
+| `KMONI_FRAME_CACHE_SIZE`                        | `30`                                                                   | 保持するフレーム数 (取りこぼし救済用)                                                                                                                                   |
+| `KMONI_BASE_URL`                                | `http://www.kmoni.bosai.go.jp`                                         | 上流の宛先。モックサーバーに向けると上流を叩かずに確認できる                                                                                                            |
+| `P2P_WS_URL` / `P2P_HISTORY_URL`                | `wss://api.p2pquake.net/v2/ws` / `https://api.p2pquake.net/v2/history` | 上流の宛先                                                                                                                                                              |
+| `P2P_RECONNECT_MIN_MS` / `P2P_RECONNECT_MAX_MS` | `1000` / `60000`                                                       | 再接続待ちの下限と上限                                                                                                                                                  |
+| `EEW_RETENTION_MS`                              | `180000`                                                               | 続報が途切れてから EEW 表示を消すまで                                                                                                                                   |
+| `EEW_WEBHOOK_URL`                               | なし                                                                   | EEW イベントを外部システムへ通知する webhook の POST 先。カンマ区切りで複数指定可。未設定なら無効                                                                       |
+| `EEW_WEBHOOK_TIMEOUT_MS`                        | `5000`                                                                 | webhook 送信のタイムアウト                                                                                                                                              |
+| `WS_HEARTBEAT_MS`                               | `30000`                                                                | クライアント WS の ping 間隔                                                                                                                                            |
+| `QUAKE_HISTORY_SIZE`                            | `12`                                                                   | 保持する地震情報の件数                                                                                                                                                  |
 
 ### 端末ごとの設定 (画面右上の「設定」)
 
@@ -204,15 +204,15 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 音と画面明滅 (通知) だけを「利用地に関わるか」で絞る。既定は絞る側で、
 全国分を鳴らしたい端末だけ「全国すべて」に切り替える。
 
-| 事象 | 表示 | 音・明滅 (既定) |
-|---|---|---|
-| EEW・警報対象地域に利用地の県 | 常時 | 警報音 + 赤明滅 |
-| EEW・県対象外だが震央が近い (既定 300km) | 常時 | 予報扱い (「予報から出す」のとき) |
-| EEW・上記以外 | 常時 (「利用地対象外」表記) | なし |
-| EEW 発表検出 (位置不明) | — | なし (「全国すべて」の端末のみ短音) |
-| 津波・自分の予報区が対象 | 常時 | 区の最大グレードが下限 (既定: 注意報) 以上で音 + 明滅 |
-| 津波・自分の区は対象外 | 常時 | なし (例外: 大津波警報はどこでも知らせる・既定 ON) |
-| 地震情報 (履歴) | 履歴パネル (絞り込み可) | なし |
+| 事象                                     | 表示                        | 音・明滅 (既定)                                       |
+| ---------------------------------------- | --------------------------- | ----------------------------------------------------- |
+| EEW・警報対象地域に利用地の県            | 常時                        | 警報音 + 赤明滅                                       |
+| EEW・県対象外だが震央が近い (既定 300km) | 常時                        | 予報扱い (「予報から出す」のとき)                     |
+| EEW・上記以外                            | 常時 (「利用地対象外」表記) | なし                                                  |
+| EEW 発表検出 (位置不明)                  | —                           | なし (「全国すべて」の端末のみ短音)                   |
+| 津波・自分の予報区が対象                 | 常時                        | 区の最大グレードが下限 (既定: 注意報) 以上で音 + 明滅 |
+| 津波・自分の区は対象外                   | 常時                        | なし (例外: 大津波警報はどこでも知らせる・既定 ON)    |
+| 地震情報 (履歴)                          | 履歴パネル (絞り込み可)     | なし                                                  |
 
 判定材料と線引き:
 
@@ -284,16 +284,16 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 (`www.kmoni.bosai.go.jp` と `api.p2pquake.net`) のみ。
 ビルド時・保守時には別の宛先が要る (後述)。
 
-| 宛先 | プロトコル | 頻度 | 用途 |
-|---|---|---|---|
-| `http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json` | HTTP/1.1 GET | 60 秒ごと | 基準時刻。端末時計のズレと配信遅れの補正 |
-| `http://www.kmoni.bosai.go.jp/webservice/hypo/eew/{YYYYMMDDhhmmss}.json` | HTTP/1.1 GET | **毎秒** | 緊急地震速報 (予報・警報)。無償で予報まで取れる唯一の経路 |
-| `http://www.kmoni.bosai.go.jp/data/map_img/RealTimeImg/jma_s/{YYYYMMDD}/{ts}.jma_s.gif` | HTTP/1.1 GET | **毎秒** | リアルタイム震度画像 (352×400 GIF、約 7.9KB) |
-| `http://www.kmoni.bosai.go.jp/data/map_img/PSWaveImg/eew/{YYYYMMDD}/{ts}.eew.gif` | HTTP/1.1 GET | EEW 発表中のみ毎秒 | P/S 波の予測円 |
-| `http://www.kmoni.bosai.go.jp/data/map_img/EstShindoImg/eew/{YYYYMMDD}/{ts}.eew.gif` | HTTP/1.1 GET | EEW 発表中のみ毎秒 | 予想震度 |
-| `wss://api.p2pquake.net/v2/ws` | **WebSocket over TLS** | 常時接続 **1 本** | 551 地震情報 / 552 津波予報 / 554 EEW 発表検出 / 556 EEW (警報) |
-| `https://api.p2pquake.net/v2/history?codes=551&limit=12` | HTTPS GET | 起動時 1 回 | 地震情報の履歴シード (起動直後に画面が空にならないように) |
-| `https://api.p2pquake.net/v2/history?codes=552&limit=1` | HTTPS GET | 起動時 1 回 | 津波予報の現況シード |
+| 宛先                                                                                    | プロトコル             | 頻度               | 用途                                                            |
+| --------------------------------------------------------------------------------------- | ---------------------- | ------------------ | --------------------------------------------------------------- |
+| `http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json`                       | HTTP/1.1 GET           | 60 秒ごと          | 基準時刻。端末時計のズレと配信遅れの補正                        |
+| `http://www.kmoni.bosai.go.jp/webservice/hypo/eew/{YYYYMMDDhhmmss}.json`                | HTTP/1.1 GET           | **毎秒**           | 緊急地震速報 (予報・警報)。無償で予報まで取れる唯一の経路       |
+| `http://www.kmoni.bosai.go.jp/data/map_img/RealTimeImg/jma_s/{YYYYMMDD}/{ts}.jma_s.gif` | HTTP/1.1 GET           | **毎秒**           | リアルタイム震度画像 (352×400 GIF、約 7.9KB)                    |
+| `http://www.kmoni.bosai.go.jp/data/map_img/PSWaveImg/eew/{YYYYMMDD}/{ts}.eew.gif`       | HTTP/1.1 GET           | EEW 発表中のみ毎秒 | P/S 波の予測円                                                  |
+| `http://www.kmoni.bosai.go.jp/data/map_img/EstShindoImg/eew/{YYYYMMDD}/{ts}.eew.gif`    | HTTP/1.1 GET           | EEW 発表中のみ毎秒 | 予想震度                                                        |
+| `wss://api.p2pquake.net/v2/ws`                                                          | **WebSocket over TLS** | 常時接続 **1 本**  | 551 地震情報 / 552 津波予報 / 554 EEW 発表検出 / 556 EEW (警報) |
+| `https://api.p2pquake.net/v2/history?codes=551&limit=12`                                | HTTPS GET              | 起動時 1 回        | 地震情報の履歴シード (起動直後に画面が空にならないように)       |
+| `https://api.p2pquake.net/v2/history?codes=552&limit=1`                                 | HTTPS GET              | 起動時 1 回        | 津波予報の現況シード                                            |
 
 宛先は環境変数で差し替えられる (`KMONI_BASE_URL` / `P2P_WS_URL` / `P2P_HISTORY_URL`)。
 検証時に上流をモックへ向けるときはここを変える。
@@ -320,11 +320,11 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 
 `kind` の意味:
 
-| kind | 意味 |
-|---|---|
-| `new` | 第一報 (新しい地震) |
-| `update` | 続報 (同じ地震の情報更新) |
-| `cancel` | キャンセル報 (取り消し) |
+| kind      | 意味                         |
+| --------- | ---------------------------- |
+| `new`     | 第一報 (新しい地震)          |
+| `update`  | 続報 (同じ地震の情報更新)    |
+| `cancel`  | キャンセル報 (取り消し)      |
 | `expired` | 続報が途切れて表示を終了した |
 
 送信は URL ごとに直列化するだけでリトライはしない。失敗してもパネル本体の動作には影響しない。
@@ -342,17 +342,17 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 (クライアントは要求を `document.baseURI` 基準の相対で組み立てる —
 `client/src/core/urls.ts`)。
 
-| パス | プロトコル | 用途 |
-|---|---|---|
-| `GET /` | HTTP(S) | パネル本体 (HTML / JS / CSS) |
-| `GET /assets/japan-map.json` | HTTP(S) | 自前の背景地図。起動時 1 回のみ (約 134KB) |
-| `GET /ws` | **WebSocket** (`ws://` / `wss://`) | イベント配信。新フレーム通知・EEW・地震情報・津波・死活 |
-| `GET /kmoni/latest.gif` | HTTP(S) | 最新のリアルタイム震度画像 (`no-store`) |
-| `GET /kmoni/frame/{ts}.gif` | HTTP(S) | タイムスタンプ指定。内容不変なのでキャッシュ可 |
-| `GET /kmoni/pswave/{ts}.gif` | HTTP(S) | 予測円 (EEW 発表中のみ) |
-| `GET /kmoni/estshindo/{ts}.gif` | HTTP(S) | 予想震度 (EEW 発表中のみ) |
-| `GET /api/state` | HTTP(S) | 現況一括 (JSON)。デバッグ用 |
-| `GET /healthz` | HTTP(S) | 死活。劣化モードでも P2P が生きていれば 200 |
+| パス                            | プロトコル                         | 用途                                                    |
+| ------------------------------- | ---------------------------------- | ------------------------------------------------------- |
+| `GET /`                         | HTTP(S)                            | パネル本体 (HTML / JS / CSS)                            |
+| `GET /assets/japan-map.json`    | HTTP(S)                            | 自前の背景地図。起動時 1 回のみ (約 134KB)              |
+| `GET /ws`                       | **WebSocket** (`ws://` / `wss://`) | イベント配信。新フレーム通知・EEW・地震情報・津波・死活 |
+| `GET /kmoni/latest.gif`         | HTTP(S)                            | 最新のリアルタイム震度画像 (`no-store`)                 |
+| `GET /kmoni/frame/{ts}.gif`     | HTTP(S)                            | タイムスタンプ指定。内容不変なのでキャッシュ可          |
+| `GET /kmoni/pswave/{ts}.gif`    | HTTP(S)                            | 予測円 (EEW 発表中のみ)                                 |
+| `GET /kmoni/estshindo/{ts}.gif` | HTTP(S)                            | 予想震度 (EEW 発表中のみ)                               |
+| `GET /api/state`                | HTTP(S)                            | 現況一括 (JSON)。デバッグ用                             |
+| `GET /healthz`                  | HTTP(S)                            | 死活。劣化モードでも P2P が生きていれば 200             |
 
 画像は WebSocket にバイナリを流さず HTTP で取りに行く方式にしている
 (キャッシュ制御とデバッグが単純になるため)。流れは
@@ -362,18 +362,18 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 
 型定義は `shared/src/protocol.ts` にあり、サーバーとクライアントで共有している。
 
-| 向き | メッセージ | 意味 |
-|---|---|---|
-| S→C | `hello` | 接続直後の現況一括 (以後の差分の基準) |
-| S→C | `frame` | kmoni の新フレームが取れた。タイムスタンプと遅延を通知 |
-| S→C | `eew` | EEW の新規・続報。`null` は表示終了 |
-| S→C | `eewDetection` | 緊急地震速報の発表検出 (詳細不明の第一報) |
-| S→C | `quake` | 地震情報 (震度速報・震源情報など) |
-| S→C | `tsunami` | 津波予報 |
-| S→C | `health` | 取得系の死活変化 (劣化モードの出入り) |
-| S→C | `pong` | アプリ層 ping への応答 |
-| C→S | `ping` | アプリ層ハートビート (20 秒ごと) |
-| C→S | `resync` | 取りこぼし時などに現況一括を要求 |
+| 向き | メッセージ     | 意味                                                   |
+| ---- | -------------- | ------------------------------------------------------ |
+| S→C  | `hello`        | 接続直後の現況一括 (以後の差分の基準)                  |
+| S→C  | `frame`        | kmoni の新フレームが取れた。タイムスタンプと遅延を通知 |
+| S→C  | `eew`          | EEW の新規・続報。`null` は表示終了                    |
+| S→C  | `eewDetection` | 緊急地震速報の発表検出 (詳細不明の第一報)              |
+| S→C  | `quake`        | 地震情報 (震度速報・震源情報など)                      |
+| S→C  | `tsunami`      | 津波予報                                               |
+| S→C  | `health`       | 取得系の死活変化 (劣化モードの出入り)                  |
+| S→C  | `pong`         | アプリ層 ping への応答                                 |
+| C→S  | `ping`         | アプリ層ハートビート (20 秒ごと)                       |
+| C→S  | `resync`       | 取りこぼし時などに現況一括を要求                       |
 
 切断対策は 3 段構えにしてある。プロキシのアイドルタイムアウト対策として
 サーバーから 30 秒ごとに WebSocket の ping フレームを送り (`WS_HEARTBEAT_MS`)、
@@ -388,12 +388,12 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 稼働中だけを絞った送信許可リストを組むなら、ビルドは別の経路で行うか、
 ビルド時だけ一時的に開ける必要がある。
 
-| 宛先 | いつ | 用途 |
-|---|---|---|
-| Docker レジストリ (`registry-1.docker.io` ほか) | `release/build_image.sh` | ベースイメージ `node:22-bookworm-slim` の取得 |
-| `https://registry.npmjs.org` | `release/build_image.sh` / `npm install` | 依存パッケージの取得 |
-| `https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson` | `scripts/build-basemap.mjs` 実行時 | 背景地図の元データ (行政区域) |
-| `http://www.kmoni.bosai.go.jp/data/map_img/CommonImg/base_map_w.gif` | `scripts/calibrate-kmoni-map.py` 実行時 | 座標系の較正に使う基図 |
+| 宛先                                                                      | いつ                                     | 用途                                          |
+| ------------------------------------------------------------------------- | ---------------------------------------- | --------------------------------------------- |
+| Docker レジストリ (`registry-1.docker.io` ほか)                           | `release/build_image.sh`                 | ベースイメージ `node:22-bookworm-slim` の取得 |
+| `https://registry.npmjs.org`                                              | `release/build_image.sh` / `npm install` | 依存パッケージの取得                          |
+| `https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson` | `scripts/build-basemap.mjs` 実行時       | 背景地図の元データ (行政区域)                 |
+| `http://www.kmoni.bosai.go.jp/data/map_img/CommonImg/base_map_w.gif`      | `scripts/calibrate-kmoni-map.py` 実行時  | 座標系の較正に使う基図                        |
 
 背景地図 (`client/public/assets/japan-map.json`) は生成済みのものをリポジトリに
 コミットしてあるので、**ビルドのたびに GeoJSON を取りに行くことはない**。
@@ -436,13 +436,13 @@ node scripts/build-basemap.mjs
 
 受け入れ条件としている項目と、その確認手順。
 
-| 条件 | 確認方法 | 状態 |
-|---|---|---|
-| kmoni 疎通断時の劣化モード | `KMONI_BASE_URL` を到達しないホストに向けて起動。地震情報履歴が出続け、画面上部に劣化モードの案内が出ること | 実装済み |
-| EEW キャンセル報・訓練報の処理 | キャンセル報で明滅と音が即座に止まり「取り消されました」と表示。訓練報では鳴らさない | 実装済み・単体テストあり |
-| 端末時計ズレ時の動作 | サーバーの時計を数十秒ずらして起動。`latest.json` 基準で補正され、画像が取得できること | 実装済み |
-| 72 時間ソークでメモリ増加なし | サーバー・表示端末双方で RSS を定期記録 | 実機で確認済み |
-| 表示端末 (フル HD) の平常時 CPU 使用率 | 実機で測って確認する | 実機で確認済み |
+| 条件                                   | 確認方法                                                                                                    | 状態                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------ |
+| kmoni 疎通断時の劣化モード             | `KMONI_BASE_URL` を到達しないホストに向けて起動。地震情報履歴が出続け、画面上部に劣化モードの案内が出ること | 実装済み                 |
+| EEW キャンセル報・訓練報の処理         | キャンセル報で明滅と音が即座に止まり「取り消されました」と表示。訓練報では鳴らさない                        | 実装済み・単体テストあり |
+| 端末時計ズレ時の動作                   | サーバーの時計を数十秒ずらして起動。`latest.json` 基準で補正され、画像が取得できること                      | 実装済み                 |
+| 72 時間ソークでメモリ増加なし          | サーバー・表示端末双方で RSS を定期記録                                                                     | 実機で確認済み           |
+| 表示端末 (フル HD) の平常時 CPU 使用率 | 実機で測って確認する                                                                                        | 実機で確認済み           |
 
 メモリはサーバー側が画像をリングバッファ (既定 30 フレーム × 3 レイヤ) に
 置くだけ、クライアント側は `ImageBitmap` を差し替え時に必ず `close()` する

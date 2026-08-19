@@ -6,10 +6,22 @@ ROOT_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
 IMAGE=quake-panel
 SMOKE_NAME=quake-panel-buildtest
 
-# プロキシ経由でビルドするときは、呼び出し側が環境変数で指定する。
-#   PROXY_URL=http://proxy.example.com:8080 PROXY_NO_PROXY=localhost release/build_image.sh
-if [ -z "${PROXY_URL}" ]; then
-    echo "ℹ️ PROXY_URL が空のためプロキシ無しでビルドします"
+# プロキシ経由でビルドするときは、ルートの .env に BUILD_PROXY_URL / BUILD_NO_PROXY_URL を書く。
+# .env 全体を source すると STATIC_DIR などが後続の npm test にも漏れるため、
+# 必要な 2 つのキーだけを読み出す (既に環境変数で渡されていればそちらを優先)。
+read_env_value() {
+    sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "${ROOT_DIR}/.env" 2>/dev/null \
+        | tail -1 | tr -d '\r' | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+BUILD_PROXY_URL=${BUILD_PROXY_URL:-$(read_env_value BUILD_PROXY_URL)}
+BUILD_NO_PROXY_URL=${BUILD_NO_PROXY_URL:-$(read_env_value BUILD_NO_PROXY_URL)}
+
+# レジストリへ到達できない環境でプロキシを渡し忘れると、npm ci は分かりにくい
+# "Exit handler never called!" で落ちるため、ここで明示しておく。
+if [ -z "${BUILD_PROXY_URL}" ]; then
+    echo "ℹ️ BUILD_PROXY_URL が空のためプロキシ無しでビルドします"
+else
+    echo "ℹ️ BUILD_PROXY_URL=${BUILD_PROXY_URL} でビルドします"
 fi
 
 # テスト (時間のかかる docker build の前に実行して早く落とす)。
@@ -40,9 +52,9 @@ fi
 docker build "${TAG_ARGS[@]}" \
         --no-cache \
         -f "${SCRIPT_DIR}/Dockerfile" \
-        --build-arg HTTP_PROXY="${PROXY_URL}" \
-        --build-arg HTTPS_PROXY="${PROXY_URL}" \
-        --build-arg NO_PROXY="${PROXY_NO_PROXY}" \
+        --build-arg HTTP_PROXY="${BUILD_PROXY_URL}" \
+        --build-arg HTTPS_PROXY="${BUILD_PROXY_URL}" \
+        --build-arg NO_PROXY="${BUILD_NO_PROXY_URL}" \
         --build-arg COMMIT_HASH="${COMMIT_HASH}" \
         "${ROOT_DIR}"
 if [ $? -ne 0 ]; then
