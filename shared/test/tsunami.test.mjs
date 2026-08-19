@@ -73,6 +73,18 @@ describe('津波予報の利用地判定 (完全一致)', () => {
     assert.equal(marked.affectsHome, false);
     assert.equal(marked.areas.some((a) => a.isHome), false);
   });
+
+  it('既に印が付いた info に空設定を適用すると印が消える (利用地解除・手動モードで予報区を空にした場合の回帰)', () => {
+    // 旧実装は targets.size === 0 のとき info をそのまま返していたため、
+    // 既に isHome: true が付いた info に空の homeAreas を渡しても
+    // isHome / affectsHome が残ってしまっていた。
+    const marked = applyHomeAreas(info, ['伊豆諸島']);
+    assert.equal(marked.affectsHome, true);
+    const cleared = applyHomeAreas(marked, []);
+    assert.equal(cleared.areas.some((a) => a.isHome), false);
+    assert.equal(cleared.affectsHome, false);
+    assert.equal(tsunamiAlertRank(cleared, 'forecast', false), 0);
+  });
 });
 
 describe('都道府県から津波予報区を決める', () => {
@@ -257,6 +269,16 @@ describe('tsunamiAlertRank', () => {
     const hokkaidoMajor = makeInfo([{ ...baseArea, name: '北海道太平洋沿岸東部', grade: 'MajorWarning' }]);
     assert.equal(tsunamiAlertRank(hokkaidoMajor, 'watch', true), 4);
     assert.equal(tsunamiAlertRank(hokkaidoMajor, 'watch', false), 0);
+  });
+
+  it('nationalMajor: 自分の区が注意報でしきい値以上でも、ランク 4 への昇格が効く (非対称の回帰テスト)', () => {
+    // 旧実装は maxHomeRank (ここでは Watch=2) >= thresholdRank (watch=2) で
+    // 先に return してしまい、自区が対象外のときと非対称に 2 のまま止まっていた。
+    const info = makeInfo([
+      { ...baseArea, name: '宮崎県', grade: 'Watch', isHome: true },
+      { ...baseArea, name: '北海道太平洋沿岸東部', grade: 'MajorWarning', isHome: false },
+    ]);
+    assert.equal(tsunamiAlertRank(info, 'watch', true), 4);
   });
 
   it('解除は常に 0', () => {

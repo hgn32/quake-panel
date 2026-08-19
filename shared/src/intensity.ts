@@ -71,10 +71,11 @@ export function parseIntensityText(text: string | null | undefined): IntensityLe
     default:
       break;
   }
-  const n = Number.parseInt(t, 10);
-  if (Number.isNaN(n)) return null;
-  if (n >= 1 && n <= 4) return (n * 10) as IntensityLevel;
-  if (n === 7) return 70;
+  // `Number.parseInt` は先頭の数字だけを読んで残りを無視するため、'1e2' や '7km' の
+  // ような壊れた文字列も 10 や 70 として受理してしまう。震度として想定する表記
+  // (数字 1 文字のみ) だけを厳密に照合し、それ以外は不明として扱う。
+  if (/^[1-4]$/.test(t)) return (Number(t) * 10) as IntensityLevel;
+  if (t === '7') return 70;
   return null;
 }
 

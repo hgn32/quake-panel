@@ -58,6 +58,16 @@ describe('地震情報の絞り込み', () => {
     const filter = { minIntensity: 0, homePrefectureOnly: true };
     assert.equal(matchesQuakeFilter(quake(10, [point('宮崎県', null)]), filter, '宮崎県'), false);
   });
+
+  it('双方向部分一致で誤爆しない (「京都」と「東京都」の回帰テスト)', () => {
+    // 旧実装は point.pref.includes(homePrefecture) || homePrefecture.includes(point.pref)
+    // という双方向部分一致だったため、利用地「東京都」の設定で「京都府」が揺れた
+    // 地震が "東京都".includes("京都") === true で誤って一致していた。
+    const filter = { minIntensity: 0, homePrefectureOnly: true };
+    const kyoto = quake(10, [point('京都府', 10)]);
+    assert.equal(matchesQuakeFilter(kyoto, filter, '東京都'), false);
+    assert.equal(matchesQuakeFilter(kyoto, filter, '京都府'), true);
+  });
 });
 
 describe('強震モニタの指標', () => {

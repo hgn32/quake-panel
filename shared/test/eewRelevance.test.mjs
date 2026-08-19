@@ -97,6 +97,24 @@ describe('eewRelevance', () => {
     assert.equal(eewRelevance(eew, '宮崎県', HOME_MIYAZAKI, 300), 'forecast');
   });
 
+  it('震央が NaN/非有限値でも forecast (null 同様に安全側へ倒す回帰テスト)', () => {
+    // 旧実装は lat/lon が null かどうかしか見ておらず、NaN だと haversineKm の
+    // 結果も NaN になって比較が false になり 'none' に落ちていた。
+    const nanEew = makeEew({
+      alert: 'forecast',
+      regions: [],
+      hypocenter: { name: '', lat: Number.NaN, lon: HYUGANADA.lon, depthKm: null, magnitude: null },
+    });
+    assert.equal(eewRelevance(nanEew, '宮崎県', HOME_MIYAZAKI, 300), 'forecast');
+
+    const infEew = makeEew({
+      alert: 'forecast',
+      regions: [],
+      hypocenter: { name: '', lat: HYUGANADA.lat, lon: Number.POSITIVE_INFINITY, depthKm: null, magnitude: null },
+    });
+    assert.equal(eewRelevance(infEew, '宮崎県', HOME_MIYAZAKI, 300), 'forecast');
+  });
+
   it('homePrefecture が null なら県照合をスキップする (震央が遠ければ none)', () => {
     const eew = makeEew({
       alert: 'warning',

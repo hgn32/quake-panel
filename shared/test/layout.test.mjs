@@ -35,4 +35,10 @@ describe('地図と地震情報の境目', () => {
     assert.equal(clampSideSize(400, 0, 'width'), SIDE_SIZE_LIMITS.width.min);
     assert.equal(clampSideSize(400, Number.POSITIVE_INFINITY, 'width'), SIDE_SIZE_LIMITS.width.min);
   });
+
+  it('px が壊れていても、画面が小さければ下限ではなく画面なりの上限を優先する', () => {
+    // 旧実装は px が不正なら常に limits.min (260) を返していたため、
+    // 画面 300px (0.6 倍の上限は 180px) でも 260px を返し、画面の 87% を占めていた。
+    assert.equal(clampSideSize(Number.NaN, 300, 'width'), 180);
+  });
 });

@@ -1,3 +1,4 @@
+import { prefMatches } from './eewRelevance.js';
 import type { QuakeInfo } from './models.js';
 
 /**
@@ -48,12 +49,11 @@ export function matchesQuakeFilter(
     if (quake.maxIntensity < filter.minIntensity) return false;
   }
   if (filter.homePrefectureOnly && homePrefecture !== null) {
+    // 双方向部分一致 (point.pref.includes(homePrefecture) など) は「京都」で
+    // 「東京都」に誤爆するため使わない。eewRelevance.ts の prefMatches と同じ方針
+    // (接尾辞の有無だけ吸収する完全一致) に揃える。
     const shook = quake.points.some(
-      (point) =>
-        point.scale !== null &&
-        (point.pref === homePrefecture ||
-          point.pref.includes(homePrefecture) ||
-          homePrefecture.includes(point.pref)),
+      (point) => point.scale !== null && prefMatches(point.pref, homePrefecture),
     );
     if (!shook) return false;
   }

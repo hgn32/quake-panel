@@ -119,7 +119,18 @@ export function eewRelevance(
     return 'warning';
   }
 
-  if (eew.hypocenter.lat === null || eew.hypocenter.lon === null) return 'forecast';
+  // 震央が不明 (null) だけでなく、壊れた電文で NaN や Infinity が来た場合も
+  // 同じ「判定できない」扱いにする。haversineKm は NaN を伝播するだけで例外に
+  // ならないため、ここで弾かないと比較が常に false になり 'none' (安全側と逆) に
+  // 落ちてしまう。
+  if (
+    eew.hypocenter.lat === null ||
+    eew.hypocenter.lon === null ||
+    !Number.isFinite(eew.hypocenter.lat) ||
+    !Number.isFinite(eew.hypocenter.lon)
+  ) {
+    return 'forecast';
+  }
 
   const distanceKm = haversineKm(home, { lat: eew.hypocenter.lat, lon: eew.hypocenter.lon });
   if (distanceKm <= radiusKm) return 'forecast';

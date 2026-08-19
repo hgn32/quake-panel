@@ -20,7 +20,9 @@ export function applyHomeAreas(
   homeAreas: readonly string[],
 ): TsunamiInfo {
   const targets = new Set(homeAreas.map((name) => name.trim()).filter((name) => name !== ''));
-  if (targets.size === 0) return info;
+  // 設定が空 (利用地未設定・手動モードで予報区を空にした等) でも、以前 isHome が
+  // 付いていた info をそのまま返してはいけない。全区を isHome: false に写像し直し、
+  // 印と affectsHome を確実に消す (印はこの後 tsunamiAlertRank の鳴動ゲートに使われる)。
   const areas = info.areas.map((area) => ({
     ...area,
     isHome: targets.has(area.name),
@@ -187,9 +189,13 @@ export function tsunamiAlertRank(
     .filter((area) => area.isHome)
     .map((area) => tsunamiGradeRank(area.grade));
   const maxHomeRank = homeRanks.length === 0 ? 0 : Math.max(...homeRanks);
-  if (maxHomeRank >= thresholdRank) return maxHomeRank;
+  // nationalMajor の条件 (どこかに大津波警報があり、国家的事象として知らせる設定) が
+  // 成立するときは、自区のランクが既にしきい値を超えていても、結果が 4 を
+  // 下回らないようにする。自区が対象外のときだけ 4 に上がるのは非対称なので揃える。
+  const nationalMajorHit = nationalMajor && info.areas.some((area) => area.grade === 'MajorWarning');
+  if (maxHomeRank >= thresholdRank) return nationalMajorHit ? Math.max(maxHomeRank, 4) : maxHomeRank;
 
-  if (nationalMajor && info.areas.some((area) => area.grade === 'MajorWarning')) return 4;
+  if (nationalMajorHit) return 4;
 
   return 0;
 }

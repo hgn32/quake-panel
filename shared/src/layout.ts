@@ -29,8 +29,12 @@ export type SideAxis = 'width' | 'height';
  */
 export function clampSideSize(px: number, total: number, axis: SideAxis): number {
   const limits = SIDE_SIZE_LIMITS[axis];
-  if (!Number.isFinite(px) || !Number.isFinite(total) || total <= 0) return limits.min;
+  if (!Number.isFinite(total) || total <= 0) return limits.min;
   const upper = Math.max(1, Math.round(total * limits.maxRatio));
   const lower = Math.min(limits.min, upper);
+  // px が壊れている (NaN 等) ときも、下限一律 (limits.min) ではなく画面に応じた
+  // lower を返す。小さい画面では lower が upper 側 (下限より狭い) に丸まっている
+  // ことがあり、そちらを優先しないと画面からはみ出す。
+  if (!Number.isFinite(px)) return lower;
   return Math.round(Math.min(Math.max(px, lower), upper));
 }

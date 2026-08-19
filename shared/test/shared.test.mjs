@@ -72,6 +72,15 @@ describe('震度階級', () => {
     assert.equal(parseIntensityText('不明'), null);
   });
 
+  it('壊れた文字列を震度として受理しない (Number.parseInt の先頭数字読みの回帰)', () => {
+    // 旧実装は Number.parseInt が先頭の数字だけ読んで残りを無視するため、
+    // '1e2' が 10 (震度1)、'7km' が 70 (震度7) に化けていた。
+    assert.equal(parseIntensityText('1e2'), null);
+    assert.equal(parseIntensityText('7km'), null);
+    assert.equal(parseIntensityText('40'), null);
+    assert.equal(parseIntensityText('7.0'), null);
+  });
+
   it('ラベルと順序比較', () => {
     assert.equal(intensityLabel(45), '5弱');
     assert.equal(intensityLabel(-1), null);
@@ -93,6 +102,13 @@ describe('時刻の扱い', () => {
     assert.equal(d.toISOString(), '2026-08-13T01:38:21.762Z');
   });
 
+  it('1〜2 桁のミリ秒は小数部として解釈する (絶対値として足さない)', () => {
+    // 旧実装は Number(ms) をそのまま足していたため、'.5' が 5ms、'.76' が
+    // 76ms になっていた (正しくは小数部として 500ms, 760ms)。
+    assert.equal(parseJstDateTime('2026/08/13 10:38:21.5').toISOString(), '2026-08-13T01:38:21.500Z');
+    assert.equal(parseJstDateTime('2026/08/13 10:38:21.76').toISOString(), '2026-08-13T01:38:21.760Z');
+  });
+
   it('kmoni タイムスタンプと相互変換できる', () => {
     const ts = '20260813111003';
     const d = fromKmoniTimestamp(ts);
@@ -104,6 +120,20 @@ describe('時刻の扱い', () => {
     assert.equal(fromKmoniTimestamp('2026081311100'), null);
     assert.equal(fromKmoniTimestamp('20261399111003'), null);
     assert.equal(parseJstDateTime(null), null);
+  });
+
+  it('実在しない日付・範囲外の時刻はロールオーバーさせず null にする', () => {
+    // 旧実装は d <= 31 / h <= 23 のような桁数だけの範囲チェックだったため、
+    // 2月30日のような存在しない日付や、25時のような範囲外の時刻を
+    // Date.UTC がそのまま翌日・翌月へロールオーバーさせて通過させていた。
+    assert.equal(fromKmoniTimestamp('20260230120000'), null); // 2026年は平年で2/29も無い
+    assert.equal(parseJstDateTime('2026/02/30 12:00:00'), null);
+    assert.equal(parseJstDateTime('2026/08/13 25:00:00'), null);
+    assert.equal(parseJstDateTime('2026/08/13 12:60:00'), null);
+    assert.equal(parseJstDateTime('2026/08/13 12:00:60'), null);
+    assert.equal(parseJstDateTime('2026/13/01 00:00:00'), null);
+    // 閏年の2/29は実在するので通る
+    assert.equal(parseJstDateTime('2028/02/29 00:00:00').toISOString(), '2028-02-28T15:00:00.000Z');
   });
 
   it('プロセスの TZ 設定に影響されない', () => {
