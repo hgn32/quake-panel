@@ -8,7 +8,9 @@
 - サーバー: Docker コンテナ 1 つ (省電力のミニ PC で足りる)
 - データ源: 強震モニタ (防災科学技術研究所) / P2P地震情報 — **いずれも無償**
 
-上流エンドポイントの実測結果は `docs/kmoni-endpoints.md` にある。
+上流エンドポイントの仕様 (実測ベースのリファレンス) は `docs/kmoni-endpoints.md`、
+電文に入る地名の値域 (府県予報区 56 区・細分区域 188 区などの全列挙) は
+`docs/area-codes.md`、EEW イベント通知 (webhook) の発火条件は `docs/eew-events.md` にある。
 
 <!-- 画面イメージ: 平常時は日本全体のリアルタイム震度マップ + 右側に地震情報履歴、
      EEW 受信時は予想最大震度の大型表示と赤い明滅に切り替わる -->
@@ -327,6 +329,9 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 | `cancel`  | キャンセル報 (取り消し)      |
 | `expired` | 続報が途切れて表示を終了した |
 
+**いつ飛ぶか**(`kind` の決まり方、毎秒ポーリングでの `update` 抑止、`expired` の保持期限、
+訓練報・デモ再生の扱い) は `docs/eew-events.md` に規定してある。
+
 送信は URL ごとに直列化するだけでリトライはしない。失敗してもパネル本体の動作には影響しない。
 `UPSTREAM_API_PROXY_URL` を設定していても、この webhook はその影響を受けず常に直接接続する
 (通知先はローカルネットワークを想定しているため)。
@@ -348,7 +353,7 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 | `GET /assets/japan-map.json`    | HTTP(S)                            | 自前の背景地図。起動時 1 回のみ (約 134KB)              |
 | `GET /ws`                       | **WebSocket** (`ws://` / `wss://`) | イベント配信。新フレーム通知・EEW・地震情報・津波・死活 |
 | `GET /kmoni/latest.gif`         | HTTP(S)                            | 最新のリアルタイム震度画像 (`no-store`)                 |
-| `GET /kmoni/frame/{ts}.gif`     | HTTP(S)                            | タイムスタンプ指定。内容不変なのでキャッシュ可          |
+| `GET /kmoni/frame/{指標}/{ts}.gif` | HTTP(S)                          | 指標とタイムスタンプ指定。内容不変なのでキャッシュ可    |
 | `GET /kmoni/pswave/{ts}.gif`    | HTTP(S)                            | 予測円 (EEW 発表中のみ)                                 |
 | `GET /kmoni/estshindo/{ts}.gif` | HTTP(S)                            | 予想震度 (EEW 発表中のみ)                               |
 | `GET /api/state`                | HTTP(S)                            | 現況一括 (JSON)。デバッグ用                             |
@@ -361,6 +366,9 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 ### WebSocket プロトコルの中身
 
 型定義は `shared/src/protocol.ts` にあり、サーバーとクライアントで共有している。
+各イベントのペイロード (フィールド名・型・欠損時の値) はこの型定義と
+`shared/src/models.ts` が一次資料。二重管理を避けるため、ここには意味だけを載せる
+(`GET /api/state` が返すのも `hello` と同じ `StateSnapshot`)。
 
 | 向き | メッセージ     | 意味                                                   |
 | ---- | -------------- | ------------------------------------------------------ |

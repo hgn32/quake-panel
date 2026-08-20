@@ -171,9 +171,22 @@ describe('P2P 556 (緊急地震速報 警報)', () => {
     assert.equal(eew.isCancel, false);
   });
 
-  it('scaleTo が -1 のときは上限なしとして扱う', () => {
+  it('scaleTo が -1 (不明) のときは上限なしとして扱う', () => {
     const eew = parseEew(
       { ...EEW_556, areas: [{ name: 'X', pref: 'Y', scaleFrom: 55, scaleTo: -1 }] },
+      NOW,
+    );
+    assert.equal(eew.regions[0].scaleFrom, 55);
+    assert.equal(eew.regions[0].scaleTo, null);
+    assert.equal(eew.maxIntensity, 55);
+  });
+
+  // 公式スキーマでは「〜程度以上」は 99 で来る (-1 は不明)。99 を震度として
+  // 通してしまうと上限が 99 のまま表示・最大震度計算に流れるため、
+  // 上限なし (null) に落ちることを固定する。
+  it('scaleTo が 99 (〜程度以上) のときも上限なしとして扱う', () => {
+    const eew = parseEew(
+      { ...EEW_556, areas: [{ name: 'X', pref: 'Y', scaleFrom: 55, scaleTo: 99 }] },
       NOW,
     );
     assert.equal(eew.regions[0].scaleFrom, 55);

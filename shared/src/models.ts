@@ -26,7 +26,7 @@ export interface EewRegion {
   name: string;
   /** 予想震度の下限 */
   scaleFrom: IntensityLevel | null;
-  /** 予想震度の上限。「以上」の場合は null */
+  /** 予想震度の上限。「〜程度以上」(P2P の 99) と不明 (-1) はどちらも null */
   scaleTo: IntensityLevel | null;
   /** 気象庁が配信した主要動到達予測時刻 (ISO)。自前計算は一切しない (§2(3))。 */
   arrivalTime: string | null;
