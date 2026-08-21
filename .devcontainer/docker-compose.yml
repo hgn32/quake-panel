@@ -14,6 +14,8 @@ services:
         NO_PROXY: ${NO_PROXY:-}
         CLAUDE_PROXY: ${CLAUDE_PROXY:-}
     environment:
+      ###claude
+      CLAUDE_CONFIG_DIR: /home/node/.claude
       # プロキシや証明書抑制関係
       PYTHONWARNINGS: ignore:Unverified HTTPS request
       HTTP_PROXY: ${HTTP_PROXY:-}
@@ -26,6 +28,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/share/ca-certificates/:/usr/share/ca-certificates/
       - $HOME/.aws/:/home/node/.aws
-      - $HOME/.claude:/home/node/.claude
-      - $HOME/.claude.json:/home/node/.claude.json
+      - claude-config:/home/node/.claude
     tty: true
+
+volumes:
+  claude-config:
+    driver: local

@@ -17,14 +17,18 @@ if [ ! -f ${HOME}/.claude/settings.json ] && [ -n "${CLAUDE_PROXY}" ]; then
 EOF
 fi
 
-# CLI の初回ウィザード（ログイン画面）をスキップするフラグを立てる。
-# ~/.claude.json はマウント外（コンテナローカル）のため再ビルドで消えるが、
-# 認証情報はマウント済みの ~/.claude/.credentials.json に残っているので、
-# このフラグさえあれば再ログインを求められない。
-node -e '
-const fs = require("fs");
-const p = process.env.HOME + "/.claude.json";
-const d = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
-d.hasCompletedOnboarding = true;
-fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");
-'
+
+# claude のオンボーディング（テーマ／ログイン方法の選択）を抑止する。
+# .claude/ は名前付きボリュームでイメージ側では管理できないためここで設定する。
+CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/.claude.json"
+if [ ! -f "${CLAUDE_JSON}" ]; then
+  echo '{"hasCompletedOnboarding":true}' > "${CLAUDE_JSON}"
+elif [ "$(jq -r '.hasCompletedOnboarding // false' "${CLAUDE_JSON}")" != "true" ]; then
+  # 既存キー（oauthAccount など）は保持したまま該当キーのみ追加する
+  if jq '.hasCompletedOnboarding = true' "${CLAUDE_JSON}" > "${CLAUDE_JSON}.tmp"; then
+    mv "${CLAUDE_JSON}.tmp" "${CLAUDE_JSON}"
+  else
+    rm -f "${CLAUDE_JSON}.tmp"
+    echo "claude: ${CLAUDE_JSON} の更新に失敗しました（JSON 不正の可能性）"
+  fi
+fi
