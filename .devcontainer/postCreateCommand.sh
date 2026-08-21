@@ -16,15 +16,3 @@ if [ ! -f ${HOME}/.claude/settings.json ] && [ -n "${CLAUDE_PROXY}" ]; then
 }
 EOF
 fi
-
-# CLI の初回ウィザード（ログイン画面）をスキップするフラグを立てる。
-# ~/.claude.json はマウント外（コンテナローカル）のため再ビルドで消えるが、
-# 認証情報はマウント済みの ~/.claude/.credentials.json に残っているので、
-# このフラグさえあれば再ログインを求められない。
-node -e '
-const fs = require("fs");
-const p = process.env.HOME + "/.claude.json";
-const d = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
-d.hasCompletedOnboarding = true;
-fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");
-'
