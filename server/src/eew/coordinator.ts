@@ -1,4 +1,5 @@
 import type { EewState } from '@quake-panel/shared';
+import { intensityLabel } from '@quake-panel/shared';
 import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
 import { createLogger } from '../logger.js';
@@ -79,10 +80,7 @@ export class EewCoordinator {
     const isNew = !previous || !isSameEvent(previous, merged);
     const cancelRising = merged.isCancel && !previous?.isCancel;
     if (isNew) {
-      log.info(
-        `EEW ${merged.alert} ${merged.hypocenter.name} M${merged.hypocenter.magnitude ?? '?'} ` +
-          `最大震度${merged.maxIntensity ?? '?'} (${merged.source})`,
-      );
+      log.info(formatEewLogLine(merged));
     }
     if (cancelRising) {
       log.info(`EEW cancelled: ${merged.id}`);
@@ -149,6 +147,20 @@ function hasMeaningfulChange(a: EewState, b: EewState): boolean {
     a.hypocenter.depthKm !== b.hypocenter.depthKm ||
     a.hypocenter.magnitude !== b.hypocenter.magnitude ||
     a.regions.length !== b.regions.length
+  );
+}
+
+/**
+ * 新規発表時のログ 1 行を整形する。
+ * `EewState.maxIntensity` は P2P 互換の整数コード (10=震度1, 45=5弱 …) であり、
+ * そのままログへ出すと数字だけの読めない表示になるため、必ず `intensityLabel`
+ * を通して「震度2」のような表示ラベルに変換してから出力する。
+ */
+export function formatEewLogLine(eew: EewState): string {
+  const label = intensityLabel(eew.maxIntensity) ?? '?';
+  return (
+    `EEW ${eew.alert} ${eew.hypocenter.name} M${eew.hypocenter.magnitude ?? '?'} ` +
+    `最大震度${label} (${eew.source})`
   );
 }
 

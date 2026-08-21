@@ -17,11 +17,11 @@ services:
       ###claude
       CLAUDE_CONFIG_DIR: /home/node/.claude
       # プロキシや証明書抑制関係
-      PYTHONWARNINGS: ignore:Unverified HTTPS request
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       CLAUDE_PROXY: ${CLAUDE_PROXY:-}
+      PYTHONWARNINGS: ignore:Unverified HTTPS request
     working_dir: /workspaces
     volumes:
       - ../:/workspaces:cached

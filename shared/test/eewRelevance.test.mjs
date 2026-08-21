@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { eewRelevance, haversineKm, prefMatches } from '../dist/index.js';
@@ -183,5 +184,58 @@ describe('eewRelevance', () => {
     assert.equal(prefMatches('京都府', '京都'), true);
     assert.equal(prefMatches('北海道', '北海道'), true);
     assert.equal(prefMatches('', '宮崎県'), false);
+  });
+});
+
+describe('府県予報区の網羅性 (気象庁 AreaForecastLocalEEW コード表との突き合わせ)', () => {
+  // 気象庁「地震火山関連コード表」シート22 (緊急地震速報／府県予報区) の全 56 区。
+  // name が実電文の areas[].pref に入る値、prefecture はコードの 3〜4 桁目
+  // (JIS 都道府県コード) から機械的に決まる対応先。出典と全表は docs/area-codes.md。
+  const ALL_AREAS = JSON.parse(
+    readFileSync(new URL('./jma-eew-local-areas.json', import.meta.url), 'utf8'),
+  );
+
+  // 震央は利用地から必ず 150km より遠くに置く。距離判定で 'forecast' に救われず、
+  // 「名前の照合だけで warning になったか」を見るため。
+  const FAR_HYPOCENTER = { lat: 24.0, lon: 123.0 };
+  const FAR_HOME = { lat: 43.06, lon: 141.35 };
+
+  const warningFor = (pref) =>
+    makeEew({
+      alert: 'warning',
+      regions: [region(pref)],
+      hypocenter: {
+        name: '',
+        lat: FAR_HYPOCENTER.lat,
+        lon: FAR_HYPOCENTER.lon,
+        depthKm: null,
+        magnitude: null,
+      },
+    });
+
+  it('コード表の 56 区がそろっていて、47 都道府県すべてに対応先がある', () => {
+    assert.equal(ALL_AREAS.length, 56);
+    assert.equal(new Set(ALL_AREAS.map((a) => a.prefecture)).size, 47);
+  });
+
+  it('全 56 区で、対応する都道府県の端末が warning になる', () => {
+    const missed = ALL_AREAS.filter(
+      (area) => eewRelevance(warningFor(area.name), area.prefecture, FAR_HOME, 150) !== 'warning',
+    ).map((area) => `${area.code} ${area.name} → ${area.prefecture}`);
+    assert.deepEqual(missed, []);
+  });
+
+  // コード表の備考に「気象庁が発信する電文では"奄美"と記載する」とある区。
+  // 括弧つきの「奄美(群島)」しか持っていなかった頃は、奄美の警報で鹿児島県の端末が
+  // warning にならず、震央が遠ければ none (無音) に落ちていた。
+  it('奄美は括弧なしの実電文表記でも鹿児島県として warning になる', () => {
+    assert.equal(eewRelevance(warningFor('奄美'), '鹿児島県', FAR_HOME, 150), 'warning');
+    assert.equal(eewRelevance(warningFor('奄美(群島)'), '鹿児島県', FAR_HOME, 150), 'warning');
+  });
+
+  it('別の県の端末では warning にならない (誤爆しない)', () => {
+    assert.notEqual(eewRelevance(warningFor('奄美'), '沖縄県', FAR_HOME, 150), 'warning');
+    assert.notEqual(eewRelevance(warningFor('東京'), '京都府', FAR_HOME, 150), 'warning');
+    assert.notEqual(eewRelevance(warningFor('京都'), '東京都', FAR_HOME, 150), 'warning');
   });
 });

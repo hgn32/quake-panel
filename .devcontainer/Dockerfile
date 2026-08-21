@@ -5,8 +5,6 @@ RUN apt-get update && \
     apt-get install -y awscli docker docker-compose tmux && \
     apt-get clean
 
-
-ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 ARG CLAUDE_PROXY
 USER node
 RUN set -eu; \

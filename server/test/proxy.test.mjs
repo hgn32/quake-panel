@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { UPSTREAM_PROXY_ENV, applyGlobalProxy, createWsProxyAgent, resolveProxyUrl } from '../dist/proxy.js';
+import {
+  UPSTREAM_PROXY_ENV,
+  applyGlobalProxy,
+  buildProxyAgentOptions,
+  createWsProxyAgent,
+  resolveProxyUrl,
+} from '../dist/proxy.js';
 
 const PROXY = 'http://proxy.example.com:3128/';
 
@@ -40,6 +46,22 @@ describe('WebSocket 用の agent', () => {
 
   it('URL として壊れていれば起動時にエラーにする (黙って直接接続にしない)', () => {
     assert.throws(() => createWsProxyAgent({ [UPSTREAM_PROXY_ENV]: 'not a url' }));
+  });
+});
+
+describe('プロキシ agent のオプション組み立て', () => {
+  it('平文 http 宛に CONNECT トンネルを張らせない (Squid が :80 への CONNECT を拒否するため proxyTunnel は false)', () => {
+    assert.equal(buildProxyAgentOptions(PROXY).proxyTunnel, false);
+  });
+
+  it('http/https どちらも同じプロキシ URL を使う', () => {
+    const options = buildProxyAgentOptions(PROXY);
+    assert.equal(options.httpProxy, PROXY);
+    assert.equal(options.httpsProxy, PROXY);
+  });
+
+  it('noProxy は空文字にして周囲の環境変数の影響を受けない', () => {
+    assert.equal(buildProxyAgentOptions(PROXY).noProxy, '');
   });
 });
 

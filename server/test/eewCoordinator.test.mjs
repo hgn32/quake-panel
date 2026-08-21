@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { EewCoordinator, isSameEvent, kmoniToState, mergeStates } from '../dist/eew/coordinator.js';
+import {
+  EewCoordinator,
+  formatEewLogLine,
+  isSameEvent,
+  kmoniToState,
+  mergeStates,
+} from '../dist/eew/coordinator.js';
 import { loadConfig } from '../dist/config.js';
 
 const base = {
@@ -191,6 +197,38 @@ describe('onEewEvent の kind 判定', () => {
     assert.equal(events.length, 2);
     assert.equal(events[0].kind, 'new');
     assert.equal(events[1].kind, 'cancel');
+  });
+});
+
+describe('EEW ログの整形', () => {
+  it('震度コードを表示ラベルに変換する (震度2)', () => {
+    const eew = { ...base, maxIntensity: 20 };
+    assert.equal(formatEewLogLine(eew), 'EEW forecast 日向灘 M5.2 最大震度2 (kmoni)');
+  });
+
+  it('5弱を表示ラベルに変換する', () => {
+    const eew = { ...base, maxIntensity: 45 };
+    assert.equal(formatEewLogLine(eew), 'EEW forecast 日向灘 M5.2 最大震度5弱 (kmoni)');
+  });
+
+  it('5弱以上 (震度計不明) を表示ラベルに変換する', () => {
+    const eew = { ...base, maxIntensity: 46 };
+    assert.equal(formatEewLogLine(eew), 'EEW forecast 日向灘 M5.2 最大震度5弱以上 (kmoni)');
+  });
+
+  it('震度7を表示ラベルに変換する', () => {
+    const eew = { ...base, maxIntensity: 70 };
+    assert.equal(formatEewLogLine(eew), 'EEW forecast 日向灘 M5.2 最大震度7 (kmoni)');
+  });
+
+  it('震度が不明のときは ? を表示する', () => {
+    const eew = { ...base, maxIntensity: null };
+    assert.equal(formatEewLogLine(eew), 'EEW forecast 日向灘 M5.2 最大震度? (kmoni)');
+  });
+
+  it('マグニチュード不明でも震度ラベル化と併存する', () => {
+    const eew = { ...base, maxIntensity: 20, hypocenter: { ...base.hypocenter, magnitude: null } };
+    assert.equal(formatEewLogLine(eew), 'EEW forecast 日向灘 M? 最大震度2 (kmoni)');
   });
 });
 

@@ -113,8 +113,10 @@ export function parseEew(msg: P2PEew, receivedAt: Date): EewState {
     pref: a.pref ?? '',
     name: a.name ?? '',
     scaleFrom: toIntensity(a.scaleFrom),
-    // scaleTo が -1 のときは「〜以上」を意味するので上限なしとして扱う
-    scaleTo: a.scaleTo === -1 ? null : toIntensity(a.scaleTo),
+    // 公式スキーマ (json-api-v2.yaml) では -1 が「不明」、99 が「〜程度以上」。
+    // どちらも上限が定まらないので null (上限なし) にする。99 は VALID_SCALES に
+    // 無いので toIntensity でも null になるが、意味の違う値なので明示しておく。
+    scaleTo: a.scaleTo === -1 || a.scaleTo === 99 ? null : toIntensity(a.scaleTo),
     arrivalTime: toIso(parseJstDateTime(a.arrivalTime)),
     condition: a.condition ?? null,
   }));
