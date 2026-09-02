@@ -1,5 +1,6 @@
 import {
   DEFAULT_FLASH_SECONDS,
+  remainingFlashMs,
   type EewRelevance,
   type EewState,
   type TsunamiInfo,
@@ -63,6 +64,11 @@ export class AlertPresenter {
    * 光らせる意味は無いので、上限を過ぎたら **その事象については** 消す。
    * 続報で震度や警報種別が変われば別の事象として光り直す。
    *
+   * 上限は「画面がこの事象を受け取った時刻」ではなく「事象の発表時刻」から数える。
+   * 前者だと、発表から数分後にページを開いた画面が最初から光り直してしまう
+   * (発表 5 分後に開いた画面で実際に発生)。`remainingFlashMs` (shared) に判定を寄せ、
+   * タイマーを張る前に「もう残り時間が無い」事象を弾く。
+   *
    * 呼び出しは applyTsunamiSound の後であること (tsunamiSeries の更新順に依存する)。
    */
   applyFlash(
@@ -84,19 +90,46 @@ export class AlertPresenter {
       this.setFlash('none');
       return;
     }
+    const remaining = remainingFlashMs(
+      this.flashStartedAt(eew, tsunami, level),
+      Date.now(),
+      this.flashSeconds,
+    );
+    if (remaining !== null && remaining <= 0) {
+      // 発表から上限を過ぎた事象。後から開いた画面で光り直さないよう、
+      // 最初から打ち切り済みとして扱う。
+      this.clearFlashTimer();
+      this.mutedKey = key;
+      this.setFlash('none');
+      return;
+    }
     // 別の事象になったらタイマーを引き直す
     if (this.flashTimer === null || key !== this.timerKey) {
       this.clearFlashTimer();
       this.timerKey = key;
-      if (this.flashSeconds > 0) {
+      // remaining が null なら「止めない」ので、タイマーは張らずに光らせ続ける。
+      if (remaining !== null) {
         this.flashTimer = window.setTimeout(() => {
           this.flashTimer = null;
           this.mutedKey = key;
           this.setFlash('none');
-        }, this.flashSeconds * 1000);
+        }, remaining);
       }
     }
     this.setFlash(level);
+  }
+
+  /**
+   * 明滅の起点となる発表時刻。`remainingFlashMs` に渡し、事象の発表時刻から
+   * 上限を数えるために使う (§applyFlash のコメント参照)。
+   */
+  private flashStartedAt(
+    eew: EewState | null,
+    tsunami: TsunamiInfo | null,
+    level: FlashLevel,
+  ): string | null {
+    if (level === 'tsunami') return tsunami?.issuedAt ?? tsunami?.receivedAt ?? null;
+    return eew?.announcedAt ?? eew?.receivedAt ?? null;
   }
 
   private timerKey: string | null = null;

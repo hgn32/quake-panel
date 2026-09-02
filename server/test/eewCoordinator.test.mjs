@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it, mock } from 'node:test';
 
 import {
   EewCoordinator,
@@ -252,5 +252,111 @@ describe('kmoni レポートの変換', () => {
     assert.equal(state.originTime, '2026-08-13T02:10:00.000Z');
     // kmoni EEW JSON は地域別の予想震度を持たない
     assert.deepEqual(state.regions, []);
+  });
+});
+
+/**
+ * 保持期限 (sweep) の確認。
+ *
+ * kmoni は最終報のあとも同じ内容を約3.5分返し続ける (2026-09-02 実測。
+ * docs/kmoni-endpoints.md §1-2)。この性質のもとでも保持期限が延び続けない
+ * ことと、最終報は通常より短く消えることを、mock timers で時間を進めて確認する。
+ */
+describe('保持期限 (sweep)', () => {
+  afterEach(() => {
+    mock.timers.reset();
+  });
+
+  /** hub の publishEew に渡った値をすべて記録するフェイク */
+  const makeSweepCoordinator = (config) => {
+    const publishes = [];
+    const coordinator = new EewCoordinator({
+      config,
+      hub: { publishEew: (eew) => publishes.push(eew) },
+      onActiveChange: () => {},
+    });
+    return { coordinator, publishes };
+  };
+
+  const hyugaReport = (patch = {}) => ({
+    id: '20260902082446',
+    reportNumber: 1,
+    alert: 'forecast',
+    isCancel: false,
+    isFinal: false,
+    isTraining: false,
+    hypocenter: { name: '日向灘', lat: 31.9, lon: 131.8, depthKm: 10, magnitude: 3.6 },
+    maxIntensity: 20,
+    originTime: new Date('2026-09-02T08:24:46.000Z'),
+    announcedAt: new Date('2026-09-02T08:24:50.000Z'),
+    ...patch,
+  });
+
+  it('【回帰】同一内容の報を毎秒受け続けても保持期限は延びない (不具合 C)', () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const { coordinator, publishes } = makeSweepCoordinator(loadConfig({}));
+    coordinator.start();
+
+    coordinator.acceptKmoni(hyugaReport());
+    // kmoni は毎秒ポーリングされ、発表中は同一報が届き続ける。
+    Array.from({ length: 170 }).forEach(() => {
+      mock.timers.tick(1000);
+      coordinator.acceptKmoni(hyugaReport());
+    });
+    assert.equal(
+      publishes.includes(null),
+      false,
+      '170 秒時点 (既定の保持時間 180 秒未満) なのに expired になっている',
+    );
+
+    mock.timers.tick(15_000); // 170s → 185s
+    assert.equal(
+      publishes[publishes.length - 1],
+      null,
+      '185 秒時点 (保持時間 180 秒超) なのに expired になっていない',
+    );
+
+    coordinator.stop();
+  });
+
+  it('最終報は短い保持時間 (既定 60 秒) で表示を終える', () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const { coordinator, publishes } = makeSweepCoordinator(loadConfig({}));
+    coordinator.start();
+
+    coordinator.acceptKmoni(hyugaReport({ reportNumber: 5, isFinal: true }));
+    mock.timers.tick(65_000);
+    assert.equal(
+      publishes[publishes.length - 1],
+      null,
+      '最終報は 65 秒経過で expired になっているはず',
+    );
+
+    coordinator.stop();
+  });
+
+  it('通常報 (最終報でない) は 65 秒ではまだ消えない', () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const { coordinator, publishes } = makeSweepCoordinator(loadConfig({}));
+    coordinator.start();
+
+    coordinator.acceptKmoni(hyugaReport({ reportNumber: 3, isFinal: false }));
+    mock.timers.tick(65_000);
+    assert.equal(publishes.includes(null), false, '通常報が 65 秒で消えてしまっている');
+
+    coordinator.stop();
+  });
+});
+
+describe('EEW_FINAL_RETENTION_MS の丸め', () => {
+  it('EEW_RETENTION_MS を超える設定は EEW_RETENTION_MS まで丸められる', () => {
+    const config = loadConfig({ EEW_RETENTION_MS: '30000', EEW_FINAL_RETENTION_MS: '90000' });
+    assert.equal(config.eewRetentionMs, 30000);
+    assert.equal(config.eewFinalRetentionMs, 30000);
+  });
+
+  it('EEW_RETENTION_MS 以下の設定はそのまま使われる', () => {
+    const config = loadConfig({ EEW_RETENTION_MS: '180000', EEW_FINAL_RETENTION_MS: '45000' });
+    assert.equal(config.eewFinalRetentionMs, 45000);
   });
 });

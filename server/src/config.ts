@@ -55,6 +55,14 @@ export interface Config {
   quakeHistorySize: number;
   /** EEW を「表示終了」とみなすまでの時間 (ms) */
   eewRetentionMs: number;
+  /**
+   * 最終報 (is_final) を受けたあとの保持時間 (ms)。
+   *
+   * kmoni は最終報のあとも同じ内容を約3.5分返し続ける (2026-09-02 実測: 最終報
+   * 08:25:26 → 08:28:00〜08:28:30 の間で「データがありません」に変化)。続報が
+   * もう来ない報を通常と同じ 180 秒保持すると、表示終了が発震から 6 分を超える。
+   */
+  eewFinalRetentionMs: number;
   /** EEW イベントを外部システムへ通知する webhook。URL 未設定なら無効。 */
   eewWebhook: {
     /** POST 先 URL（複数可） */
@@ -65,6 +73,7 @@ export interface Config {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const eewRetentionMs = num(env['EEW_RETENTION_MS'], 180_000);
   return {
     port: num(env['PORT'], 8080),
     host: str(env['HOST'], '0.0.0.0'),
@@ -90,7 +99,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     wsHeartbeatMs: num(env['WS_HEARTBEAT_MS'], 30_000),
     quakeHistorySize: num(env['QUAKE_HISTORY_SIZE'], 12),
-    eewRetentionMs: num(env['EEW_RETENTION_MS'], 180_000),
+    eewRetentionMs,
+    // 最終報の保持時間が通常の保持時間より長いと設定ミスで意味が無くなる
+    // (最終報だけ長く残ってしまう) ため、通常の保持時間を上限に丸める。
+    eewFinalRetentionMs: Math.min(eewRetentionMs, num(env['EEW_FINAL_RETENTION_MS'], 60_000)),
     eewWebhook: {
       urls: str(env['EEW_WEBHOOK_URL'], '')
         .split(',')

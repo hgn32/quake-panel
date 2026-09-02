@@ -79,6 +79,8 @@ export class EewCoordinator {
     const previous = this.current;
     const isNew = !previous || !isSameEvent(previous, merged);
     const cancelRising = merged.isCancel && !previous?.isCancel;
+    // 新規発表・キャンセル・内容変化のときだけ真 (webhook 通知の抑止にも使う。§下記)
+    const changed = !previous || hasMeaningfulChange(previous, merged);
     if (isNew) {
       log.info(formatEewLogLine(merged));
     }
@@ -87,15 +89,18 @@ export class EewCoordinator {
     }
 
     this.current = merged;
-    this.lastUpdateAt = Date.now();
+    // kmoni は最終報のあとも同じ内容を約3.5分返し続ける (2026-09-02 実測)。同一内容の
+    // 再受信でも lastUpdateAt を進めると保持期限が毎秒延長され、表示終了が発震から
+    // 6 分を超えてしまう。保持期限は「内容が動いた時刻」から数える。
+    if (changed) this.lastUpdateAt = Date.now();
     this.deps.hub.publishEew(merged);
     this.deps.onActiveChange(true);
     // kmoni EEW は毎秒ポーリングされ、発表中は同一報でもここまで来る。内容が実質的に
     // 変わっていないときまで webhook (onEewEvent) へ 'update' を流すと、発表中ずっと
     // 同一内容を秒間隔で POST し続けることになるため、Hub.hasEewChanged (hub.ts) と
-    // 同じ基準の変化判定を挟んで抑止する。新規発表・キャンセル・内容変化は必ず通知する。
+    // 同じ基準の変化判定 (changed) を挟んで抑止する。
     const kind: EewEventKind = cancelRising ? 'cancel' : isNew ? 'new' : 'update';
-    if (!previous || hasMeaningfulChange(previous, merged)) {
+    if (changed) {
       this.deps.onEewEvent?.({ kind, eew: merged });
     }
   }
@@ -114,7 +119,7 @@ export class EewCoordinator {
   private sweep(): void {
     if (!this.current) return;
     const age = Date.now() - this.lastUpdateAt;
-    const limit = this.current.isCancel ? CANCEL_RETENTION_MS : this.deps.config.eewRetentionMs;
+    const limit = this.retentionMs(this.current);
     if (age < limit) return;
     log.debug(`EEW ${this.current.id} expired after ${Math.round(age / 1000)}s`);
     const expired = this.current;
@@ -122,6 +127,20 @@ export class EewCoordinator {
     this.deps.hub.publishEew(null);
     this.deps.onActiveChange(false);
     this.deps.onEewEvent?.({ kind: 'expired', eew: expired });
+  }
+
+  /**
+   * いまの状態を保持し続ける時間 (ms)。
+   *
+   * 最終報 (isFinal) はもう続報が来ないと分かっている報なので、通常より短い
+   * `eewFinalRetentionMs` で消す。kmoni は最終報のあとも同じ内容を約3.5分
+   * 返し続けるため (2026-09-02 実測)、通常と同じ長さで保持すると発震から
+   * 表示終了まで 6 分を超えてしまう。
+   */
+  private retentionMs(state: EewState): number {
+    if (state.isCancel) return CANCEL_RETENTION_MS;
+    if (state.isFinal) return this.deps.config.eewFinalRetentionMs;
+    return this.deps.config.eewRetentionMs;
   }
 }
 

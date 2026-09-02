@@ -118,6 +118,27 @@ export const KMONI_CAPTION_BOX = {
 } as const;
 
 /**
+ * 予測円画像 (PSWaveImg) に焼き込まれている震央マーカーの半径 (配信画像のピクセル)。
+ *
+ * 実測 (2026-09-02 08:25 日向灘, PSWaveImg/eew/20260902/20260902082600.eew.gif):
+ * 震央 (65, 352) を中心に x=60..70 / y=347..357 の 1px 線の X が描かれている。
+ * 拡大表示ではこの 1px 線が倍率ぶんに膨らみ、5.3 倍で約 150px の巨大な点線 X に
+ * なってしまう。震央は自前のマーカーで描いているので、この範囲は描画から外す。
+ * 6 は実測の ±5px に 1px の余裕を持たせた値。
+ */
+export const KMONI_EPICENTER_MARK_RADIUS = 6;
+
+/** 震央マーカーが焼き込まれている矩形 (配信画像のピクセル座標) */
+export function epicenterMarkRect(
+  lat: number,
+  lon: number,
+): { x: number; y: number; width: number; height: number } {
+  const p = projectToPixel(lat, lon);
+  const r = KMONI_EPICENTER_MARK_RADIUS;
+  return { x: p.x - r, y: p.y - r, width: r * 2, height: r * 2 };
+}
+
+/**
  * 表示の初期中心。設定されていないときの既定値なので、
  * 特定の住所を示唆しない場所 (東京駅) を置いてある。
  */
