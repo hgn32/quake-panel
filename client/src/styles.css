@@ -264,7 +264,7 @@ body.cursor-hidden * {
   font-size: 14px;
 }
 
-/* クリックで最寄りの観測点を出すラベル。地図の左上に固定し、5 秒で自動的に消える。 */
+/* クリックで最寄りの観測点を出すラベル。地図の左上に固定し、他の場所を押すまで残す。 */
 .station-label {
   position: absolute;
   top: 14px;

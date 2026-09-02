@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { tmpdir } from 'node:os';
 
 import { resolveStaticRoot } from '../dist/http/static.js';
 
@@ -27,7 +28,11 @@ describe('resolveStaticRoot', () => {
   it('process.cwd() に依存しない (dev の cwd は server/ になるが影響しない)', () => {
     const moduleUrl = 'file:///workspaces/server/dist/http/server.js';
     const originalCwd = process.cwd();
-    process.chdir('/workspaces/server');
+    // 実在するディレクトリへ移る。以前は moduleUrl と同じ /workspaces/server へ
+    // 移していたが、そのパスが無い環境ではテスト自体が ENOENT で落ちていた。
+    // ここで確かめたいのは「cwd がどこであっても結果が変わらない」ことなので、
+    // 移る先はリポジトリと無関係な場所であるほどよい。
+    process.chdir(tmpdir());
     try {
       assert.equal(resolveStaticRoot(moduleUrl, 'client/dist'), '/workspaces/client/dist');
     } finally {

@@ -82,7 +82,7 @@ export class App {
   private readonly splitter: Splitter;
   /** 「デモ再生中」の誤認防止バナー。demo- の EEW/津波を受けている間だけ出す。 */
   private readonly demoBanner: HTMLElement;
-  /** 地図クリックで最寄りの観測点名を出すラベル。5 秒で自動的に消える。 */
+  /** 地図クリックで最寄りの観測点名を出すラベル。閉じるまで出したままにする。 */
   private readonly stationLabel: HTMLElement;
 
   private quakes: QuakeInfo[] = [];
@@ -93,7 +93,6 @@ export class App {
   private testFlashTimer: number | null = null;
   private viewSaveTimer: number | null = null;
   private sideSaveTimer: number | null = null;
-  private stationLabelTimer: number | null = null;
   /** 利用地ピック中のセッションを丸ごと破棄する関数。再入したときに前回分を必ず片付けるために使う。 */
   private homePickCancel: (() => void) | null = null;
 
@@ -173,6 +172,7 @@ export class App {
     this.startClock();
     this.setupAudioGate();
     this.setupCursorAutoHide();
+    this.setupStationLabel();
     this.setupMapControls();
     return this.mapView.init().then(() => {
       this.connection.start();
@@ -421,22 +421,39 @@ export class App {
 
   /**
    * 地図クリックで拾えた最寄りの観測点名を表示する。
-   * クリックのたびに置き換わり、5 秒で自動的に消える。`null` (該当なし) は即座に消す。
+   *
+   * 出したままにして、閉じるのは利用者に任せる (ダイアログと同じ扱い)。
+   * 時間で勝手に消すと、読んでいる途中で消えることがあるため。
+   * 別の観測点を押せば置き換わり、観測点以外を押せば消える (`null` が来る)。
+   * 地図の外を押したときは `setupStationLabel` の後始末で消す。
    */
   private handleStationSelect(station: KmoniStation | null): void {
-    if (this.stationLabelTimer !== null) window.clearTimeout(this.stationLabelTimer);
-    this.stationLabelTimer = null;
     if (!station) {
       this.stationLabel.hidden = true;
       return;
     }
     this.stationLabel.textContent = `${station.pref} ${station.name} (${station.net} ${station.code})`;
     this.stationLabel.hidden = false;
-    this.stationLabelTimer = window.setTimeout(() => {
-      this.stationLabelTimer = null;
-      this.stationLabel.hidden = true;
-    }, 5000);
   }
+
+  /**
+   * 観測点名を地図の外のクリックでも閉じる。
+   *
+   * 地図の中は MapView から `handleStationSelect(null)` が来るのでそちらに任せる。
+   * ここで拾うのは「地図以外を押したとき」だけ (地震情報の一覧や設定を触ったら
+   * 閉じる)。押し始めで閉じるので、ドラッグの途中でも残らない。
+   */
+  private setupStationLabel(): void {
+    document.addEventListener('pointerdown', this.handleOutsidePointerDown);
+  }
+
+  private readonly handleOutsidePointerDown = (ev: PointerEvent): void => {
+    if (this.stationLabel.hidden) return;
+    const target = ev.target;
+    // 地図の上での操作は MapView が結果を返してくれるので、ここでは触らない
+    if (target instanceof Node && requireElement('map').contains(target)) return;
+    this.stationLabel.hidden = true;
+  };
 
   /**
    * 地図から利用地を選ぶ。
@@ -655,7 +672,7 @@ export class App {
     if (this.testFlashTimer !== null) window.clearTimeout(this.testFlashTimer);
     if (this.viewSaveTimer !== null) window.clearTimeout(this.viewSaveTimer);
     if (this.sideSaveTimer !== null) window.clearTimeout(this.sideSaveTimer);
-    if (this.stationLabelTimer !== null) window.clearTimeout(this.stationLabelTimer);
+    document.removeEventListener('pointerdown', this.handleOutsidePointerDown);
     this.connection.stop();
     this.frames.dispose();
     this.mapView.dispose();
