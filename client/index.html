@@ -39,6 +39,9 @@
           <canvas id="map" class="map-canvas"></canvas>
           <div id="map-notice" class="map-notice" hidden></div>
 
+          <!-- 観測点名。地図クリックで最寄りの観測点を表示し、5 秒で自動的に消える -->
+          <div id="station-label" class="station-label" hidden></div>
+
           <!-- 利用地を選ぶモード。押した位置は仮で、決定するまで保存しない -->
           <div id="map-pick" class="map-pick" hidden>
             <span class="map-pick__label">利用地にする場所を地図でクリックしてください</span>
@@ -58,7 +61,7 @@
           </div>
           <div class="map-credit">
             <!-- クレジット表示は利用条件 §2(1) の成立条件 -->
-            強震モニタ (防災科学技術研究所) / 地震・津波情報: 気象庁 (P2P地震情報経由)
+            強震モニタ・観測点情報 (防災科学技術研究所) / 地震・津波情報: 気象庁 (P2P地震情報経由)
           </div>
           <div class="map-legend" id="map-legend"></div>
         </section>

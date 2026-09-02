@@ -28,6 +28,7 @@ import {
   liftPointColor,
   type MapViewState,
 } from './core/mapView.js';
+import type { KmoniStation } from './core/stations.js';
 import { SettingsStore, type Settings } from './settings.js';
 import { h, replaceChildren, requireElement } from './ui/dom.js';
 import { EewPanel } from './ui/eewPanel.js';
@@ -81,6 +82,8 @@ export class App {
   private readonly splitter: Splitter;
   /** 「デモ再生中」の誤認防止バナー。demo- の EEW/津波を受けている間だけ出す。 */
   private readonly demoBanner: HTMLElement;
+  /** 地図クリックで最寄りの観測点名を出すラベル。5 秒で自動的に消える。 */
+  private readonly stationLabel: HTMLElement;
 
   private quakes: QuakeInfo[] = [];
   private tsunami: TsunamiInfo | null = null;
@@ -90,12 +93,14 @@ export class App {
   private testFlashTimer: number | null = null;
   private viewSaveTimer: number | null = null;
   private sideSaveTimer: number | null = null;
+  private stationLabelTimer: number | null = null;
   /** 利用地ピック中のセッションを丸ごと破棄する関数。再入したときに前回分を必ず片付けるために使う。 */
   private homePickCancel: (() => void) | null = null;
 
   constructor() {
     this.alert = new AlertPresenter(requireElement('flash'));
     this.alert.audio.setVolume(this.settings.volume);
+    this.stationLabel = requireElement('station-label');
 
     this.mapView = new MapView(
       requireElement<HTMLCanvasElement>('map'),
@@ -105,6 +110,7 @@ export class App {
         home: this.settings.home,
       },
       (view) => this.handleViewChange(view),
+      (station) => this.handleStationSelect(station),
     );
     this.frames = new FrameStream((frame) => {
       this.mapView.setFrame(frame);
@@ -414,6 +420,25 @@ export class App {
   }
 
   /**
+   * 地図クリックで拾えた最寄りの観測点名を表示する。
+   * クリックのたびに置き換わり、5 秒で自動的に消える。`null` (該当なし) は即座に消す。
+   */
+  private handleStationSelect(station: KmoniStation | null): void {
+    if (this.stationLabelTimer !== null) window.clearTimeout(this.stationLabelTimer);
+    this.stationLabelTimer = null;
+    if (!station) {
+      this.stationLabel.hidden = true;
+      return;
+    }
+    this.stationLabel.textContent = `${station.pref} ${station.name} (${station.net} ${station.code})`;
+    this.stationLabel.hidden = false;
+    this.stationLabelTimer = window.setTimeout(() => {
+      this.stationLabelTimer = null;
+      this.stationLabel.hidden = true;
+    }, 5000);
+  }
+
+  /**
    * 地図から利用地を選ぶ。
    *
    * クリックしただけでは確定させず、地図の上の帯に候補を出して「決定」を待つ。
@@ -630,6 +655,7 @@ export class App {
     if (this.testFlashTimer !== null) window.clearTimeout(this.testFlashTimer);
     if (this.viewSaveTimer !== null) window.clearTimeout(this.viewSaveTimer);
     if (this.sideSaveTimer !== null) window.clearTimeout(this.sideSaveTimer);
+    if (this.stationLabelTimer !== null) window.clearTimeout(this.stationLabelTimer);
     this.connection.stop();
     this.frames.dispose();
     this.mapView.dispose();

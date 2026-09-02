@@ -8,6 +8,10 @@ kmoni は投影パラメータを公開していない。そこで公開され�
 得られた値は shared/src/kmoniGeo.ts の KMONI_MAP / KMONI_INSET に入れる。
 kmoni 側の基図が差し替えられた場合はこのスクリプトを再実行して更新する。
 
+2026-09-02 以降の較正値は、このスクリプトではなく防災科研の公式観測点リスト
+(K-NET + KiK-net) との対応で再推定している。手順は docs/kmoni-endpoints.md
+§1-4 を参照 (このスクリプトはフォールバック用として残してある)。
+
 必要なもの:
     pip install pillow numpy scipy
     ネットワーク (kmoni の基図・リアルタイム画像、行政区域 GeoJSON)

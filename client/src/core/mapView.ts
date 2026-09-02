@@ -9,6 +9,7 @@ import {
 } from '@quake-panel/shared';
 import { Basemap, DARK_THEME } from './basemap.js';
 import type { FrameImages } from './frameStream.js';
+import { StationList, type KmoniStation } from './stations.js';
 
 /**
  * 地図の表示位置。中心は配信画像のピクセル座標で持つ。
@@ -98,6 +99,7 @@ interface Transform {
 export class MapView {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly basemap = new Basemap();
+  private readonly stations = new StationList();
   private frame: FrameImages | null = null;
   private eew: EewState | null = null;
   private tsunami: TsunamiInfo | null = null;
@@ -121,6 +123,12 @@ export class MapView {
     private options: MapViewOptions,
     /** ホイール・ドラッグで表示位置が動いたときに呼ばれる (保存はアプリ側) */
     private readonly onViewChange?: (view: MapViewState) => void,
+    /**
+     * クリックで最寄りの観測点を拾えたときに呼ばれる (該当が無ければ null)。
+     * 表示位置の操作 (`interactive`) が false でも呼ぶ。表示位置を変えない
+     * 操作なので、キオスク運用 (`interactive: false`) でも使えてよいため。
+     */
+    private readonly onStationSelect?: (station: KmoniStation | null) => void,
   ) {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('2D コンテキストを取得できませんでした');
@@ -129,16 +137,19 @@ export class MapView {
   }
 
   init(): Promise<void> {
-    return this.basemap
-      .load()
-      .catch(() => {
+    return Promise.all([
+      this.basemap.load().catch(() => {
         // 背景地図が無くても kmoni 画像だけで成立させる (単体で成立させる方針 §1)。
         // 読めたかどうかは isBasemapLoaded() で参照できる。
-      })
-      .then(() => {
-        this.observeResize();
-        this.resize();
-      });
+      }),
+      this.stations.load().catch(() => {
+        // 観測点表が無くても従来の塊抽出 (extractPoints) にフォールバックする。
+        // 読めたかどうかは realtimePoints() 内の isLoaded() 判定で参照する。
+      }),
+    ]).then(() => {
+      this.observeResize();
+      this.resize();
+    });
   }
 
   /** 背景地図を読めたか (読めていなくても観測点は描ける) */
@@ -293,8 +304,13 @@ export class MapView {
       this.canvas.releasePointerCapture(ev.pointerId);
     }
     // 動かさずに離したときだけ「クリック」とみなす (スクロールと区別する)
-    if (drag.moved > 4 || !this.pick) return;
-    this.pick(this.locationAt(ev.clientX, ev.clientY));
+    if (drag.moved > 4) return;
+    if (this.pick) {
+      // 利用地ピック中はピックを優先し、観測点名は返さない
+      this.pick(this.locationAt(ev.clientX, ev.clientY));
+      return;
+    }
+    this.onStationSelect?.(this.stationAt(ev.clientX, ev.clientY));
   };
 
   /** ドラッグ中に出る選択メニューを抑える */
@@ -365,6 +381,18 @@ export class MapView {
     const p = this.toMapPixel(clientX - rect.left, clientY - rect.top);
     const inset = this.basemap.prefectureAtPixel(p.x, p.y) === '沖縄県';
     return unprojectFromPixel(p.x, p.y, { inset });
+  }
+
+  /**
+   * 画面上のクリック位置にいちばん近い観測点。14px (画面座標) を超えたら null。
+   * 拡大表示では 14px が指す配信画像上の距離が縮むので、`transform.scale` で
+   * 画面 px → 配信画像 px に直してから `stations.nearest()` に渡す。
+   */
+  private stationAt(clientX: number, clientY: number): KmoniStation | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const p = this.toMapPixel(clientX - rect.left, clientY - rect.top);
+    const maxPx = 14 / this.transform.scale;
+    return this.stations.nearest(p.x, p.y, maxPx);
   }
 
   /** 中心は画像の中に収める。行き過ぎて真っ黒になるのを防ぐ。 */
@@ -591,7 +619,87 @@ export class MapView {
 
 
   /**
-   * 観測点の位置と色を拾う。
+   * 観測点の位置と色を拾う (描画側の入口)。
+   *
+   * リアルタイム震度・最大加速度などの観測点画像 (`REALTIME_POINTS`) は、観測点表
+   * (`StationList`) が読めていれば `samplePoints` (表の位置の色を読むだけ) を使う。
+   * 表が読めていない場合と、予想震度 (`EST_SHINDO_POINTS`、観測点より細かい格子で
+   * 描かれているため常にこちら) は従来どおり `extractPoints` (塊探索) にフォールバックする。
+   * 分岐をここ 1 箇所にまとめることで、呼び出し側 (`drawPoints`) は経路を意識しない。
+   */
+  private realtimePoints(bitmap: ImageBitmap, spec: PointSpec): Map<string, number[]> {
+    if (spec.key === REALTIME_POINTS.key && this.stations.isLoaded()) {
+      return this.samplePoints(bitmap, spec);
+    }
+    return this.extractPoints(bitmap, spec);
+  }
+
+  /**
+   * 観測点表を使って色を拾う。
+   *
+   * 公式の観測点リスト (防災科研 K-NET/KiK-net) の緯度経度は kmoni の描画位置と
+   * 一致することを実測で確認している (画像から分離した 1,366 点すべてが 2.86px 以内、
+   * 中央値 1.30px、2026-09-02)。塊を格子で拾い直す従来の方法は、密集地で実在しない
+   * 観測点が等間隔に並び、塊が海へはみ出した所にも点が出ていた。表があるなら
+   * その位置の色を読むだけでよく、走査も塊探索も要らない。
+   */
+  private samplePoints(bitmap: ImageBitmap, spec: PointSpec): Map<string, number[]> {
+    const cached = this.extracted.get(spec.key);
+    if (cached && cached.bitmap === bitmap) return cached.points;
+    const { width, height } = KMONI_MAP;
+    const canvas = this.scratch ?? document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    this.scratch = canvas;
+    const points = new Map<string, number[]>();
+    if (!ctx) return points;
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(bitmap, 0, 0);
+    const src = ctx.getImageData(0, 0, width, height).data;
+
+    // 中心画素 → 上下左右 → 斜めの順で近い方から見る。新較正でも中心画素が
+    // 一致するのは 78.8% で、残りは kmoni 側の丸めで ±1px ずれるため
+    // (`shared/src/kmoniGeo.ts` の較正コメント参照)。8 画素すべて透過ならその
+    // 観測点は (画像側でまだ描かれていないとみなし) 描かない。
+    const neighbors: ReadonlyArray<readonly [number, number]> = [
+      [0, 0],
+      [0, -1],
+      [0, 1],
+      [-1, 0],
+      [1, 0],
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ];
+
+    this.stations.all().forEach((station) => {
+      const baseX = Math.floor(station.x);
+      const baseY = Math.floor(station.y);
+      const opaque = neighbors.find(([dx, dy]) => {
+        const x = baseX + dx;
+        const y = baseY + dy;
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        return src[(y * width + x) * 4 + 3] !== 0;
+      });
+      if (opaque === undefined) return;
+      const [dx, dy] = opaque;
+      const index = (baseY + dy) * width + (baseX + dx);
+      const color = this.pointColor(src, index, spec.lift);
+      const list = points.get(color) ?? [];
+      // 点の座標は表の連続座標をそのまま使う (読み取った画素の位置ではない)。
+      // 色だけを画像から取る。
+      list.push(station.x, station.y);
+      points.set(color, list);
+    });
+
+    this.extracted.set(spec.key, { bitmap, points });
+    return points;
+  }
+
+  /**
+   * 観測点の位置と色を拾う (`extractPoints` 版・塊抽出)。
    *
    * 配信画像では観測点が 3x3 px の四角で描かれている (`spec.grid === 3` のとき)。
    * 画像のまま拡大すると四角も一緒に大きくなり、拡大するほど地図が四角で埋まって
@@ -760,7 +868,7 @@ export class MapView {
   ): void {
     const { scale, offsetX, offsetY } = this.transform;
     const half = size / 2;
-    const points = this.extractPoints(bitmap, spec);
+    const points = this.realtimePoints(bitmap, spec);
     const { width, height } = this.cssSize;
 
     ctx.save();

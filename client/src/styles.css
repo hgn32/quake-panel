@@ -264,6 +264,19 @@ body.cursor-hidden * {
   font-size: 14px;
 }
 
+/* クリックで最寄りの観測点を出すラベル。地図の左上に固定し、5 秒で自動的に消える。 */
+.station-label {
+  position: absolute;
+  top: 14px;
+  left: 12px;
+  background: #0b0f18cc;
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
 /* ---------- 右側パネル ---------- */
 
 .side {

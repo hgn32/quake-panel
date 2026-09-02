@@ -439,6 +439,25 @@ node scripts/build-basemap.mjs
 
 出典: 「国土数値情報(行政区域データ)」(国土交通省) を加工して作成。
 
+### 観測点表
+
+観測点名の表示 (地図クリック) とリアルタイム震度・最大加速度などの点の位置は、
+配信画像を解析せず、防災科研の公式観測点リスト
+(`client/public/assets/kmoni-stations.json`、K-NET + KiK-net 1,749 点) から得ている。
+
+- **入手元 (要ユーザー登録)**: <https://www.kyoshin.bosai.go.jp/ja/stationlist/>
+  でユーザー登録のうえ CSV をダウンロードする。
+- リストの緯度経度は kmoni の描画位置と一致することを実測で確認済み (詳細は
+  `docs/kmoni-endpoints.md` §1-4)。座標系の較正もこのリストとの対応で行っている。
+- 再生成するには:
+
+```bash
+node scripts/build-station-list.mjs --source <ダウンロードした CSV のパス>
+```
+
+同梱の JSON は生成済みのものをリポジトリにコミットしてあるので、通常のビルドで
+CSV を取りに行くことはない。
+
 ---
 
 ## 受け入れ条件と確認方法
