@@ -2,10 +2,13 @@ import {
   KMONI_CAPTION_BOX,
   KMONI_MAP,
   epicenterMarkRect as computeEpicenterMarkRect,
+  measureWaveRadii,
   projectToPixel,
   unprojectFromPixel,
   type EewState,
+  type Point,
   type TsunamiInfo,
+  type WaveRadii,
 } from '@quake-panel/shared';
 import { Basemap, DARK_THEME } from './basemap.js';
 import type { FrameImages } from './frameStream.js';
@@ -89,6 +92,12 @@ export class MapView {
   /** 抽出済みの観測点。直近の 1 枚分だけ持つ (予想震度は画像描画に戻したので点は持たない)。 */
   private points: Map<string, number[]> | null = null;
   private pointsFor: ImageBitmap | null = null;
+  /**
+   * 予測円 (P波・S波) の半径。直近の 1 枚分だけ持つ (points/pointsFor と同じ考え方)。
+   * EEW 中は毎秒 60fps で再描画されるため、同じビットマップで測り直さないようにする。
+   */
+  private waveRadii: WaveRadii | null = null;
+  private waveRadiiFor: ImageBitmap | null = null;
   private pick: ((location: { lat: number; lon: number }) => void) | null = null;
 
   constructor(
@@ -549,10 +558,11 @@ export class MapView {
    * はみ出しも隙間も出ない。拡大すると四角いブロックに見えるが、それが配信
    * データの解像度そのものである。
    *
-   * 予測円は円 (P 波・S 波) に加えて震央マーカー (焼き込み) を含む画像 (実測
-   * 2026-09-02 日向灘、docs/kmoni-endpoints.md §1-3)。震央マーカーは自前の
-   * マーカーと二重表示になるため、その矩形だけ穴あきクリップで外す。予測円は
-   * 見た目を滑らかにしたいので、こちらだけ補間する。
+   * 予測円 (P波・S波) は原則ベクタで描く (`drawWaveCircles`)。震央と半径さえ
+   * 分かれば円は自前で描け、配信画像 (352x400、1px 線) を拡大するよりも滑らかに
+   * なる。震央の緯度経度が無い、または画素から半径を測れなかったときだけ、
+   * 従来どおり配信画像を貼るフォールバックに切り替える (詳細は `drawWaveCircles`
+   * のコメント参照)。
    */
   private drawKmoniLayers(ctx: CanvasRenderingContext2D): void {
     const frame = this.frame;
@@ -572,22 +582,120 @@ export class MapView {
     this.drawPoints(ctx, frame.realtime, this.pointSize());
 
     if (frame.psWave) {
-      ctx.save();
-      ctx.translate(this.transform.offsetX, this.transform.offsetY);
-      ctx.scale(this.transform.scale, this.transform.scale);
-      // 円は滑らかに見せたいので補間する (色から値を読む処理ではなく見せ方の調整 §2(2))
-      ctx.imageSmoothingEnabled = true;
-      // 震央マーカー (焼き込み) の矩形を穴あきクリップで除く。震央は自前で描いている。
-      const mark = this.epicenterMarkRect();
-      if (mark) {
-        ctx.beginPath();
-        ctx.rect(0, 0, KMONI_MAP.width, KMONI_MAP.height);
-        ctx.rect(mark.x, mark.y, mark.width, mark.height);
-        ctx.clip('evenodd');
-      }
-      ctx.drawImage(frame.psWave, 0, 0, KMONI_MAP.width, KMONI_MAP.height);
-      ctx.restore();
+      this.drawWaveCircles(ctx, frame.psWave);
     }
+  }
+
+  /**
+   * 予測円 (P波・S波) の描画。
+   *
+   * 以前は配信画像 (352x400 GIF、1px 線) をそのまま拡大して貼っていたが、拡大表示
+   * では 1px 線が倍率ぶんに膨らみ、ぼけたり階段状になったりして解像度が頭打ちに
+   * なっていた。震央と半径さえ分かれば円は自前でベクタ描画でき、拡大しても輪郭が
+   * 滑らかなまま解像度が頭打ちにならないため、ここではベクタ描画に切り替える。
+   *
+   * 半径は配信画像から測った値をそのまま使い、到達予測をこちらで計算することは
+   * 絶対にしない (§2(3))。震央も EEW 電文の緯度経度をそのまま使う (`this.eew`)。
+   *
+   * 測る際は中央値を採る (`measureWaveRadii`)。円が画像の端で切れていても、
+   * 焼き込みの「P」「S」の文字や震央マーカー (赤い X) が混ざっても、中央値なら
+   * 影響を受けない。実測 (2026-09-07 23:21 熊本県天草・芦北地方の EEW) では
+   * S波(赤)/P波(青) の半径の中央値がそれぞれ 23:22:00 時点で 27.17px/51.17px、
+   * 23:23:00 時点で 86.37px/159.78px と滑らかに成長しており、四分位も中央値の
+   * ±0.4px に収まっていた。
+   *
+   * 震央の緯度経度が無い場合、または画素から半径を測れなかった場合 (P波・S波と
+   * も null) は、従来どおり配信画像を貼るフォールバックに切り替える
+   * (`drawWaveImageFallback`)。ベクタ描画に成功した場合は画像を貼らないため、
+   * 震央マーカー (焼き込み) の穴あきクリップも焼き込みの文字も自然に消える。
+   */
+  private drawWaveCircles(ctx: CanvasRenderingContext2D, bitmap: ImageBitmap): void {
+    const eew = this.eew;
+    const lat = eew?.hypocenter.lat ?? null;
+    const lon = eew?.hypocenter.lon ?? null;
+    if (lat === null || lon === null) {
+      this.drawWaveImageFallback(ctx, bitmap);
+      return;
+    }
+    const imageCenter = projectToPixel(lat, lon);
+    const radii = this.measureWaveRadiiFor(bitmap, imageCenter);
+    if (radii.p === null && radii.s === null) {
+      this.drawWaveImageFallback(ctx, bitmap);
+      return;
+    }
+    const screenCenter = this.toScreen(lat, lon);
+    ctx.save();
+    // 画面上一定の太さで描く (配信画像の 1px 線を拡大するのではなく、
+    // 画面座標側に line width を指定するのでベクタとして常に滑らか)。
+    ctx.lineWidth = 2;
+    if (radii.p !== null) {
+      ctx.strokeStyle = '#0000ff';
+      ctx.beginPath();
+      ctx.arc(screenCenter.x, screenCenter.y, radii.p * this.transform.scale, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (radii.s !== null) {
+      ctx.strokeStyle = '#ff0000';
+      ctx.beginPath();
+      ctx.arc(screenCenter.x, screenCenter.y, radii.s * this.transform.scale, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * 予測円のフォールバック (配信画像をそのまま貼る)。
+   *
+   * `drawWaveCircles` からのみ呼ばれる。震央の緯度経度が無い、または画素から
+   * 半径を測れなかった (P波・S波とも null) ときだけ使う経路で、通常の EEW では
+   * ベクタ描画 (`drawWaveCircles`) が使われる。
+   */
+  private drawWaveImageFallback(ctx: CanvasRenderingContext2D, bitmap: ImageBitmap): void {
+    ctx.save();
+    ctx.translate(this.transform.offsetX, this.transform.offsetY);
+    ctx.scale(this.transform.scale, this.transform.scale);
+    // 円は滑らかに見せたいので補間する (色から値を読む処理ではなく見せ方の調整 §2(2))
+    ctx.imageSmoothingEnabled = true;
+    // 震央マーカー (焼き込み) の矩形を穴あきクリップで除く。震央は自前で描いている。
+    const mark = this.epicenterMarkRect();
+    if (mark) {
+      ctx.beginPath();
+      ctx.rect(0, 0, KMONI_MAP.width, KMONI_MAP.height);
+      ctx.rect(mark.x, mark.y, mark.width, mark.height);
+      ctx.clip('evenodd');
+    }
+    ctx.drawImage(bitmap, 0, 0, KMONI_MAP.width, KMONI_MAP.height);
+    ctx.restore();
+  }
+
+  /**
+   * 予測円画像から P波・S波の半径を測る (ビットマップごとにキャッシュ)。
+   *
+   * `points`/`pointsFor` と同じ考え方で、EEW 中の毎フレーム再描画のたびに
+   * 測り直すことはしない。測定そのものは `measureWaveRadii` (shared、純関数)
+   * に委ね、ここでは画素を取り出す canvas の操作だけを行う。
+   */
+  private measureWaveRadiiFor(bitmap: ImageBitmap, center: Point): WaveRadii {
+    if (this.waveRadiiFor === bitmap && this.waveRadii) return this.waveRadii;
+    const { width, height } = KMONI_MAP;
+    const canvas = this.scratch ?? document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    this.scratch = canvas;
+    const empty: WaveRadii = { p: null, s: null };
+    if (!ctx) {
+      this.waveRadii = empty;
+      this.waveRadiiFor = bitmap;
+      return empty;
+    }
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(bitmap, 0, 0);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    const radii = measureWaveRadii(pixels, width, height, center);
+    this.waveRadii = radii;
+    this.waveRadiiFor = bitmap;
+    return radii;
   }
 
   /**

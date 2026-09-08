@@ -6,6 +6,7 @@ export * from './quakeFilter.js';
 export * from './intensity.js';
 export * from './layout.js';
 export * from './kmoniGeo.js';
+export * from './kmoniWave.js';
 export * from './models.js';
 export * from './polygon.js';
 export * from './protocol.js';
