@@ -53,6 +53,8 @@ P2P 556 (WebSocket)   ─┘        │
   (順位 1 が先に立つ)。
 - `new` の直前に別の地震が表示中だった場合、その古い地震の `expired` は**飛ばない**。
   上書きされて消えるため。受け側は `new` を受けたら前の地震の表示を畳むこと。
+- **表示中の地震が無いときは、この表より前に `isStaleRepeat` の判定が入る** (§6-1)。
+  表示を終えた地震の焼き直し電文はここに来る前に捨てられ、`kind` は何も決まらない。
 
 ## 3. 同一地震の判定 (`isSameEvent`)
 
@@ -117,7 +119,33 @@ regions.length
 
 `expired` は「**表示を終了した**」の意味で、地震や揺れの終了ではない。
 飛ぶときの `eew` は**最後に保持していた状態そのまま** (合成結果)。
-`expired` の後に同じ地震の続報が届けば、それは `new` として飛ぶ。
+`expired` の後に同じ地震の**新しい情報を持つ**続報が届けば、それは `new` として飛ぶ
+(「新しい情報を持つ」の判定は次項の `isStaleRepeat` を参照)。
+
+### 6-1. 表示終了後に届いた同一電文の扱い (`isStaleRepeat`)
+
+kmoni は**最終報のあとも同じ電文を約3.5分返し続ける** (2026-09-02 実測。
+[kmoni-endpoints.md](kmoni-endpoints.md) §1-2)。最終報の保持時間 (既定 60 秒,
+`EEW_FINAL_RETENTION_MS`) はこれより短いため、`expired` で表示を終えた直後に
+同じ電文がまた届く。これを「表示中の地震が無い」→「新規発表」と誤認すると、
+`new` を撃って 60 秒後にまた `expired` → また誤認 …を繰り返してしまう
+(実際に **2026-09-07 23:21 熊本県天草・芦北地方の EEW (M3.7) で、報1〜報4 が
+すべて同じ `report_id` / `origin_time` の 1 件の地震にもかかわらず、
+約60秒間隔で `new` が 3 回発火**した)。
+
+これを防ぐため、`accept()` は**表示中の地震が無いとき**に限り、直前に表示を終えた
+地震 (`lastExpired`) と比べて `isStaleRepeat(lastExpired, incoming)` が真なら、
+publish も `onEewEvent` も呼ばずに**電文を捨てる**。
+
+| 条件 | 扱い |
+|---|---|
+| 別の地震 (`isSameEvent` が偽) | 通す (新しい地震なので当然) |
+| 同じ地震で、報数が `lastExpired` 以下、かつキャンセルの立ち上がりでない | **捨てる** (焼き直し) |
+| 同じ地震で、報数が `lastExpired` より増えている | 通す (`new` として再表示。新しい情報を持つ続報) |
+| 同じ地震で、`lastExpired` はキャンセルでなく今回がキャンセル | 通す (`cancel` として発火。誤報の周知は表示終了後でも重要) |
+
+`lastExpired` は `sweep()` で `expired` を出すたびに直近 1 件だけ更新される
+(表示中に上書きされて次の地震が始まれば、当然その時点でリセットされる)。
 
 ## 7. 訓練報・キャンセル報のフィルタ
 
@@ -169,6 +197,7 @@ regions.length
 | 何を | どこ |
 |---|---|
 | `kind` 判定 (`new` / `update` / `cancel`) と `update` 抑止、同一地震判定、合成規則 | `server/test/eewCoordinator.test.mjs` |
+| 表示終了後の焼き直し電文の判定 (`isStaleRepeat`) と、保持期限切れ後の `new` 再発火防止 | `server/test/eewCoordinator.test.mjs` |
 | デモの `new → update×10 → expired` と `demo-` 接頭辞 | `server/test/demoRunner.test.mjs` |
 | (未カバー) 実電文での `expired` — 保持期限切れの発火は自動テストが無い | — |
 | 送信の直列化・失敗時に本体が止まらないこと | `server/test/webhookNotifier.test.mjs` |

@@ -45,6 +45,15 @@ export class EewCoordinator {
   private current: EewState | null = null;
   private lastUpdateAt = 0;
   private sweeper: NodeJS.Timeout | null = null;
+  /**
+   * 表示を終えた直近の地震。
+   *
+   * kmoni は最終報のあとも同じ電文を約3.5分返し続ける (2026-09-02 実測)。保持期限が
+   * それより短いと「期限切れ → 同じ電文を新規発表と誤認 → また期限切れ」を繰り返し、
+   * webhook へ new が何度も飛ぶ (2026-09-07 23:21 熊本県天草・芦北地方の EEW で
+   * 約60秒間隔に 3 回発火した)。焼き直しの電文を捨てるために覚えておく。
+   */
+  private lastExpired: EewState | null = null;
 
   constructor(private readonly deps: EewCoordinatorDeps) {}
 
@@ -70,6 +79,11 @@ export class EewCoordinator {
   }
 
   private accept(incoming: EewState): void {
+    // 表示を終えた地震の焼き直し。復活させると new を撃ち直してしまう (§lastExpired)
+    if (this.current === null && this.lastExpired !== null && isStaleRepeat(this.lastExpired, incoming)) {
+      return;
+    }
+
     const merged =
       this.current && isSameEvent(this.current, incoming)
         ? mergeStates(this.current, incoming)
@@ -124,6 +138,7 @@ export class EewCoordinator {
     log.debug(`EEW ${this.current.id} expired after ${Math.round(age / 1000)}s`);
     const expired = this.current;
     this.current = null;
+    this.lastExpired = expired;
     this.deps.hub.publishEew(null);
     this.deps.onActiveChange(false);
     this.deps.onEewEvent?.({ kind: 'expired', eew: expired });
@@ -196,6 +211,19 @@ export function isSameEvent(a: EewState, b: EewState): boolean {
     if (diff <= SAME_EVENT_TOLERANCE_MS) return true;
   }
   return false;
+}
+
+/**
+ * 表示を終えた地震の「焼き直し」電文か。
+ *
+ * 同じ地震で、報数が増えておらず、キャンセルでもない電文は新しい情報を持たないので
+ * 捨てる。報数が増えた続報と、あとから来たキャンセル報は新しい情報なので通す
+ * (キャンセルは誤報を知らせる大事な報なので、表示を終えたあとでも受ける)。
+ */
+export function isStaleRepeat(expired: EewState, incoming: EewState): boolean {
+  if (!isSameEvent(expired, incoming)) return false;
+  if (incoming.isCancel && !expired.isCancel) return false;
+  return incoming.reportNumber <= expired.reportNumber;
 }
 
 /**

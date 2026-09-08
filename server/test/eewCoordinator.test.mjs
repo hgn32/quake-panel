@@ -5,6 +5,7 @@ import {
   EewCoordinator,
   formatEewLogLine,
   isSameEvent,
+  isStaleRepeat,
   kmoniToState,
   mergeStates,
 } from '../dist/eew/coordinator.js';
@@ -90,6 +91,35 @@ describe('kmoni と P2P の合成', () => {
     assert.equal(merged.maxIntensity, 40);
     assert.equal(merged.hypocenter.name, '日向灘');
     assert.equal(merged.hypocenter.lat, 32.3);
+  });
+});
+
+describe('焼き直し電文の判定 (isStaleRepeat)', () => {
+  it('別の地震なら焼き直しではない', () => {
+    const other = { ...base, id: 'b', originTime: '2026-08-13T02:12:00.000Z' };
+    assert.equal(isStaleRepeat(base, other), false);
+  });
+
+  it('同じ地震で報数が同じなら焼き直し', () => {
+    assert.equal(isStaleRepeat(base, { ...base }), true);
+  });
+
+  it('同じ地震で報数が減っていても (来ないはずだが) 焼き直し扱い', () => {
+    const expired = { ...base, reportNumber: 3 };
+    const incoming = { ...base, reportNumber: 2 };
+    assert.equal(isStaleRepeat(expired, incoming), true);
+  });
+
+  it('報数が増えた続報は焼き直しではない', () => {
+    const expired = { ...base, reportNumber: 3 };
+    const incoming = { ...base, reportNumber: 4 };
+    assert.equal(isStaleRepeat(expired, incoming), false);
+  });
+
+  it('キャンセルの立ち上がりは報数が同じでも焼き直しではない', () => {
+    const expired = { ...base, reportNumber: 3, isCancel: false };
+    const incoming = { ...base, reportNumber: 3, isCancel: true };
+    assert.equal(isStaleRepeat(expired, incoming), false);
   });
 });
 
@@ -267,15 +297,17 @@ describe('保持期限 (sweep)', () => {
     mock.timers.reset();
   });
 
-  /** hub の publishEew に渡った値をすべて記録するフェイク */
+  /** hub の publishEew に渡った値と onEewEvent のイベントをすべて記録するフェイク */
   const makeSweepCoordinator = (config) => {
     const publishes = [];
+    const events = [];
     const coordinator = new EewCoordinator({
       config,
       hub: { publishEew: (eew) => publishes.push(eew) },
       onActiveChange: () => {},
+      onEewEvent: (event) => events.push(event),
     });
-    return { coordinator, publishes };
+    return { coordinator, publishes, events };
   };
 
   const hyugaReport = (patch = {}) => ({
@@ -343,6 +375,78 @@ describe('保持期限 (sweep)', () => {
     coordinator.acceptKmoni(hyugaReport({ reportNumber: 3, isFinal: false }));
     mock.timers.tick(65_000);
     assert.equal(publishes.includes(null), false, '通常報が 65 秒で消えてしまっている');
+
+    coordinator.stop();
+  });
+
+  it('【回帰】最終報で表示終了したあと、同じ電文を受け続けても new が再発火しない (1 回の地震で通知が何度も飛んでいた不具合)', () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const { coordinator, publishes, events } = makeSweepCoordinator(loadConfig({}));
+    coordinator.start();
+
+    const finalReport = hyugaReport({ reportNumber: 4, isFinal: true });
+    coordinator.acceptKmoni(finalReport);
+    mock.timers.tick(65_000); // 最終報の保持時間 (既定 60 秒) を超えて expired になる
+    assert.equal(publishes[publishes.length - 1], null, '65 秒経過しても expired になっていない');
+    assert.equal(
+      events.filter((e) => e.kind === 'new').length,
+      1,
+      '最初の発表で new が 1 回発火しているはず',
+    );
+
+    // kmoni は最終報のあとも約3.5分は同じ電文を返し続ける (2026-09-02 実測)。
+    // ここではその再受信を模して、同一内容の報を複数回 (60 秒間隔を想定して sweep を挟みつつ) accept する。
+    Array.from({ length: 3 }).forEach(() => {
+      coordinator.acceptKmoni(finalReport);
+      mock.timers.tick(60_000);
+    });
+
+    assert.equal(
+      events.filter((e) => e.kind === 'new').length,
+      1,
+      '焼き直しの電文で new が再発火している (通知が何度も飛ぶ不具合の再発)',
+    );
+    assert.equal(
+      publishes.filter((p) => p !== null).length,
+      1,
+      '焼き直しの電文で publishEew (表示の復活) が再び呼ばれている',
+    );
+
+    coordinator.stop();
+  });
+
+  it('表示終了後でも報数が増えた続報は受け付ける (new が飛ぶ)', () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const { coordinator, events } = makeSweepCoordinator(loadConfig({}));
+    coordinator.start();
+
+    coordinator.acceptKmoni(hyugaReport({ reportNumber: 4, isFinal: true }));
+    mock.timers.tick(65_000); // expired になる
+
+    coordinator.acceptKmoni(hyugaReport({ reportNumber: 5, isFinal: true }));
+    assert.equal(
+      events[events.length - 1].kind,
+      'new',
+      '表示終了後に届いた報数の増えた続報は new として受け付けるはず',
+    );
+
+    coordinator.stop();
+  });
+
+  it('表示終了後に届いたキャンセル報は受け付ける (cancel が飛ぶ)', () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const { coordinator, events } = makeSweepCoordinator(loadConfig({}));
+    coordinator.start();
+
+    coordinator.acceptKmoni(hyugaReport({ reportNumber: 4, isFinal: true }));
+    mock.timers.tick(65_000); // expired になる
+
+    coordinator.acceptKmoni(hyugaReport({ reportNumber: 4, isFinal: true, isCancel: true }));
+    assert.equal(
+      events[events.length - 1].kind,
+      'cancel',
+      '表示終了後に届いたキャンセル報は cancel として受け付けるはず',
+    );
 
     coordinator.stop();
   });
