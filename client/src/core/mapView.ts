@@ -34,34 +34,6 @@ export function liftPointColor(r: number, g: number, b: number): [number, number
   return [r + (255 - r) * lift, g + (255 - g) * lift, b + (255 - b) * lift];
 }
 
-/**
- * 観測点抽出の仕様。レイヤによって「何を観測点とみなすか」が異なるため型で表す。
- */
-interface PointSpec {
-  /** キャッシュの区別に使う名前 */
-  key: string;
-  /**
-   * 3x3 の四角で描かれた観測点をほぐすための格子間隔。
-   * 1 なら画素をそのまま 1 点として扱う (予想震度はこちら)。
-   */
-  grid: number;
-  /** 左上の見出し帯 (英字と時刻) を除くか */
-  skipCaption: boolean;
-  /** 暗い色を白へ寄せて明るくするか */
-  lift: boolean;
-}
-
-/** リアルタイム震度・最大加速度などの観測点画像 */
-const REALTIME_POINTS: PointSpec = { key: 'realtime', grid: 3, skipCaption: true, lift: true };
-
-/**
- * 予想震度画像。実測 (2026-09-02 日向灘) で観測点ごとの 2x2px の点として
- * 描かれており (不透明画素の 97.6% が観測点画像の点と 2px 以内)、面ではない。
- * 画素をそのまま点として拾う。見出し帯はこの画像には焼き込まれていないので除かない。
- * 色はもともと明るい緑〜黄なので明度調整もしない。
- */
-const EST_SHINDO_POINTS: PointSpec = { key: 'estShindo', grid: 1, skipCaption: false, lift: false };
-
 /** 拡大率の範囲。1 未満は余白が増えるだけなので許さない。 */
 export const ZOOM_RANGE = { min: 1, max: 8 } as const;
 
@@ -114,8 +86,9 @@ export class MapView {
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDistance: number | null = null;
   private scratch: HTMLCanvasElement | null = null;
-  /** 抽出済みの点。レイヤごとに直近の 1 枚分だけ持つ。 */
-  private readonly extracted = new Map<string, { bitmap: ImageBitmap; points: Map<string, number[]> }>();
+  /** 抽出済みの観測点。直近の 1 枚分だけ持つ (予想震度は画像描画に戻したので点は持たない)。 */
+  private points: Map<string, number[]> | null = null;
+  private pointsFor: ImageBitmap | null = null;
   private pick: ((location: { lat: number; lon: number }) => void) | null = null;
 
   constructor(
@@ -562,12 +535,24 @@ export class MapView {
    * いずれも同じ座標系で配信されるため、無変換で重ねられる。
    * ここでは重ねて表示するだけで、色から値を読み取るような処理は一切しない (§2(2))。
    *
-   * 予想震度は「面」ではなく観測点ごとの 2x2px の点、予測円は円 (P 波・S 波) に
-   * 加えて震央マーカー (焼き込み) を含む画像 (実測 2026-09-02 日向灘、
-   * docs/kmoni-endpoints.md §1-3)。以前は両方とも面として画像を拡大していたが、
-   * 予想震度は点が倍率ぶんの塊ににじみ、予測円の震央マーカーは自前のマーカーと
-   * 二重表示になっていた。予想震度は観測点と同じ抽出経路で点として描き、
-   * 予測円は画像のまま重ねつつ震央マーカーの矩形だけ穴あきクリップで外す。
+   * 予想震度は画素ごとに値を持つ「面」である (実測 2026-09-07 23:21 熊本県天草・
+   * 芦北地方の EEW: 不透明画素 2,517 個が x=1..69 / y=296..383 に連続して隙間なく
+   * 並び、隣り合う画素で値が滑らかに変化する)。2026-09-02 日向灘 M3.6 のような
+   * 小さい地震では閾値を超えた所だけが飛び石状に残ってまばらに見えるが、それは
+   * 規模が小さいからそう見えるだけで、点ではない。以前この誤認から観測点と同じ
+   * 抽出経路で点として描いていたが、拡大時に画素の間隔が点の大きさを上回って
+   * 格子状に見える不具合になっていた (面を点として描いたのが原因)。
+   *
+   * 面なので画像のまま重ねるが、補間はしない (`imageSmoothingEnabled = false`)。
+   * 補間すると 1 画素が周囲へにじみ、海岸線からはみ出して位置がずれて見える。
+   * 切れば 1 画素が示す地理的な範囲 (約 4.4km 四方) そのものとして描かれ、
+   * はみ出しも隙間も出ない。拡大すると四角いブロックに見えるが、それが配信
+   * データの解像度そのものである。
+   *
+   * 予測円は円 (P 波・S 波) に加えて震央マーカー (焼き込み) を含む画像 (実測
+   * 2026-09-02 日向灘、docs/kmoni-endpoints.md §1-3)。震央マーカーは自前の
+   * マーカーと二重表示になるため、その矩形だけ穴あきクリップで外す。予測円は
+   * 見た目を滑らかにしたいので、こちらだけ補間する。
    */
   private drawKmoniLayers(ctx: CanvasRenderingContext2D): void {
     const frame = this.frame;
@@ -575,15 +560,16 @@ export class MapView {
 
     if (frame.estShindo) {
       ctx.save();
+      ctx.translate(this.transform.offsetX, this.transform.offsetY);
+      ctx.scale(this.transform.scale, this.transform.scale);
+      ctx.imageSmoothingEnabled = false;
       ctx.globalAlpha = 0.75;
-      // 予想震度の点は観測点と同じ位置に出るため、観測点と同じ大きさだと
-      // 上に重なる観測点に完全に隠れてしまう。+2px 大きく描いて縁だけ覗かせる。
-      this.drawPoints(ctx, frame.estShindo, EST_SHINDO_POINTS, this.pointSize() + 2);
+      ctx.drawImage(frame.estShindo, 0, 0, KMONI_MAP.width, KMONI_MAP.height);
       ctx.restore();
     }
 
     // 観測点は倍率によらず一定の大きさで描く (画像ごと拡大しない)
-    this.drawPoints(ctx, frame.realtime, REALTIME_POINTS, this.pointSize());
+    this.drawPoints(ctx, frame.realtime, this.pointSize());
 
     if (frame.psWave) {
       ctx.save();
@@ -621,17 +607,14 @@ export class MapView {
   /**
    * 観測点の位置と色を拾う (描画側の入口)。
    *
-   * リアルタイム震度・最大加速度などの観測点画像 (`REALTIME_POINTS`) は、観測点表
-   * (`StationList`) が読めていれば `samplePoints` (表の位置の色を読むだけ) を使う。
-   * 表が読めていない場合と、予想震度 (`EST_SHINDO_POINTS`、観測点より細かい格子で
-   * 描かれているため常にこちら) は従来どおり `extractPoints` (塊探索) にフォールバックする。
-   * 分岐をここ 1 箇所にまとめることで、呼び出し側 (`drawPoints`) は経路を意識しない。
+   * 観測点表 (`StationList`) が読めていれば `samplePoints` (表の位置の色を読むだけ)
+   * を使う。読めていない場合は従来どおり `extractPoints` (塊探索) にフォールバック
+   * する。分岐をここ 1 箇所にまとめることで、呼び出し側 (`drawPoints`) は経路を
+   * 意識しない。
    */
-  private realtimePoints(bitmap: ImageBitmap, spec: PointSpec): Map<string, number[]> {
-    if (spec.key === REALTIME_POINTS.key && this.stations.isLoaded()) {
-      return this.samplePoints(bitmap, spec);
-    }
-    return this.extractPoints(bitmap, spec);
+  private realtimePoints(bitmap: ImageBitmap): Map<string, number[]> {
+    if (this.stations.isLoaded()) return this.samplePoints(bitmap);
+    return this.extractPoints(bitmap);
   }
 
   /**
@@ -643,9 +626,8 @@ export class MapView {
    * 観測点が等間隔に並び、塊が海へはみ出した所にも点が出ていた。表があるなら
    * その位置の色を読むだけでよく、走査も塊探索も要らない。
    */
-  private samplePoints(bitmap: ImageBitmap, spec: PointSpec): Map<string, number[]> {
-    const cached = this.extracted.get(spec.key);
-    if (cached && cached.bitmap === bitmap) return cached.points;
+  private samplePoints(bitmap: ImageBitmap): Map<string, number[]> {
+    if (this.pointsFor === bitmap && this.points) return this.points;
     const { width, height } = KMONI_MAP;
     const canvas = this.scratch ?? document.createElement('canvas');
     canvas.width = width;
@@ -686,7 +668,7 @@ export class MapView {
       if (opaque === undefined) return;
       const [dx, dy] = opaque;
       const index = (baseY + dy) * width + (baseX + dx);
-      const color = this.pointColor(src, index, spec.lift);
+      const color = this.pointColor(src, index);
       const list = points.get(color) ?? [];
       // 点の座標は表の連続座標をそのまま使う (読み取った画素の位置ではない)。
       // 色だけを画像から取る。
@@ -694,32 +676,28 @@ export class MapView {
       points.set(color, list);
     });
 
-    this.extracted.set(spec.key, { bitmap, points });
+    this.points = points;
+    this.pointsFor = bitmap;
     return points;
   }
 
   /**
    * 観測点の位置と色を拾う (`extractPoints` 版・塊抽出)。
    *
-   * 配信画像では観測点が 3x3 px の四角で描かれている (`spec.grid === 3` のとき)。
-   * 画像のまま拡大すると四角も一緒に大きくなり、拡大するほど地図が四角で埋まって
-   * しまう (本家の強震モニタは倍率によらず一定の大きさで描いている)。
+   * 配信画像では観測点が 3x3 px の四角で描かれている。画像のまま拡大すると
+   * 四角も一緒に大きくなり、拡大するほど地図が四角で埋まってしまう
+   * (本家の強震モニタは倍率によらず一定の大きさで描いている)。
    * そこで観測点の位置だけを拾い、画面上の大きさは描画側で決める。
    *
    * 密集地では隣り合う四角がくっついて 1 つの大きな塊になる (実測で最大
    * 1264 px = 100 点以上が地続き)。塊の内側を無条件に拾うと、ありもしない
-   * 観測点が線状に並んでしまうため、塊ごとに `spec.grid` px 間隔の格子で拾い直す。
-   * `spec.grid` は四角の一辺で、隣り合う観測点の最小間隔でもある。
-   *
-   * 予想震度画像 (`spec.grid === 1`) は観測点ごとの 2x2px の点として描かれており
-   * 面ではない (実測 2026-09-02 日向灘)。塊の探索をするまでもなく、不透明画素を
-   * そのまま点として拾えばよいので、この場合は flood fill をせず 1 周で済ませる。
+   * 観測点が線状に並んでしまうため、塊ごとに 3px 間隔の格子で拾い直す。
+   * 3px は四角の一辺で、隣り合う観測点の最小間隔でもある。
    *
    * 毎秒動く処理なので、全画素を見る走査は 1 回だけにしてある。
    */
-  private extractPoints(bitmap: ImageBitmap, spec: PointSpec): Map<string, number[]> {
-    const cached = this.extracted.get(spec.key);
-    if (cached && cached.bitmap === bitmap) return cached.points;
+  private extractPoints(bitmap: ImageBitmap): Map<string, number[]> {
+    if (this.pointsFor === bitmap && this.points) return this.points;
     const { width, height } = KMONI_MAP;
     const canvas = this.scratch ?? document.createElement('canvas');
     canvas.width = width;
@@ -732,13 +710,6 @@ export class MapView {
     ctx.drawImage(bitmap, 0, 0);
     const src = ctx.getImageData(0, 0, width, height).data;
 
-    const add = (index: number): void => {
-      const color = this.pointColor(src, index, spec.lift);
-      const list = points.get(color) ?? [];
-      list.push((index % width) + 0.5, Math.floor(index / width) + 0.5);
-      points.set(color, list);
-    };
-
     // 色の付いている画素を集める (全画素 = 140,800 を見るのはここだけ)。
     //
     // ここだけは `for` を使う。規約では for を禁止しているが、この走査は
@@ -748,32 +719,31 @@ export class MapView {
     //   forEach + filter      中央値 2.2ms / フレーム
     //
     // と 2 倍違う。非力な端末では更に開くため、速い方を採る (2026-08-16 実測)。
-    // 予想震度も同じ走査を使う (grid<=1 なら塊の探索を省いてこの 1 周だけで済む
-    // ので、むしろ観測点より軽い)。他の箇所は規約どおり forEach / filter / map を使う。
+    // 他の箇所は規約どおり forEach / filter / map を使っている。
     const filled = new Uint8Array(width * height);
     const cap = KMONI_CAPTION_BOX;
     const opaque: number[] = [];
     for (let y = 1; y < height - 1; y += 1) {
       const row = y * width;
-      const inCaptionRow = spec.skipCaption && y < cap.height;
+      const inCaptionRow = y < cap.height;
       for (let x = 1; x < width - 1; x += 1) {
         if (src[(row + x) * 4 + 3] === 0) continue;
         // 左上の見出し帯 (英字と時刻) は観測点ではない
         if (inCaptionRow && x < cap.width) continue;
         filled[row + x] = 1;
         opaque.push(row + x);
-        if (spec.grid <= 1) add(row + x);
       }
-    }
-
-    if (spec.grid <= 1) {
-      this.extracted.set(spec.key, { bitmap, points });
-      return points;
     }
 
     const visited = new Uint8Array(width * height);
     const stack: number[] = [];
     const cells: number[] = [];
+    const add = (index: number): void => {
+      const color = this.pointColor(src, index);
+      const list = points.get(color) ?? [];
+      list.push((index % width) + 0.5, Math.floor(index / width) + 0.5);
+      points.set(color, list);
+    };
 
     // 同じ理由でここも for (塊の数だけ回る)
     for (const seed of opaque) {
@@ -814,12 +784,12 @@ export class MapView {
         }
       }
 
-      // 塊の左上を基準に spec.grid px 間隔で拾う (1 つの四角からは 1 点だけ出る)
+      // 塊の左上を基準に 3px 間隔で拾う (1 つの四角からは 1 点だけ出る)
       let found = 0;
       for (const index of cells) {
         const x = index % width;
         const y = (index - x) / width;
-        if ((x - minX) % spec.grid !== 1 || (y - minY) % spec.grid !== 1) continue;
+        if ((x - minX) % 3 !== 1 || (y - minY) % 3 !== 1) continue;
         add(index);
         found += 1;
       }
@@ -828,7 +798,8 @@ export class MapView {
         add(cells[Math.floor(cells.length / 2)] as number);
       }
     }
-    this.extracted.set(spec.key, { bitmap, points });
+    this.points = points;
+    this.pointsFor = bitmap;
     return points;
   }
 
@@ -836,14 +807,10 @@ export class MapView {
    * 観測点の色。
    * 平常時の色 (濃い青) は黒い背景の上だと重く沈むので、暗い色ほど白へ寄せて
    * 明るくする。色相は変えない (強い揺れの黄〜赤はほぼそのまま)。
-   * 予想震度はもともと明るい緑〜黄なので、`lift` が false のときは調整しない。
    */
-  private pointColor(src: Uint8ClampedArray, index: number, lift: boolean): string {
+  private pointColor(src: Uint8ClampedArray, index: number): string {
     const i = index * 4;
-    const r0 = src[i] ?? 0;
-    const g0 = src[i + 1] ?? 0;
-    const b0 = src[i + 2] ?? 0;
-    const [r, g, b] = lift ? liftPointColor(r0, g0, b0) : [r0, g0, b0];
+    const [r, g, b] = liftPointColor(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0);
     return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
   }
 
@@ -860,15 +827,10 @@ export class MapView {
    * 倍率を上げても四角は大きくならない (呼び出し側が渡す size で決まる)。
    * 画面座標で整数に丸めて描くので、拡大しても輪郭がぼやけない。
    */
-  private drawPoints(
-    ctx: CanvasRenderingContext2D,
-    bitmap: ImageBitmap,
-    spec: PointSpec,
-    size: number,
-  ): void {
+  private drawPoints(ctx: CanvasRenderingContext2D, bitmap: ImageBitmap, size: number): void {
     const { scale, offsetX, offsetY } = this.transform;
     const half = size / 2;
-    const points = this.realtimePoints(bitmap, spec);
+    const points = this.realtimePoints(bitmap);
     const { width, height } = this.cssSize;
 
     ctx.save();
