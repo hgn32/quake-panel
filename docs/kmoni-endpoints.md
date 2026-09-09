@@ -113,8 +113,16 @@ $ curl -s http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json
 | リアルタイム震度 | `/data/map_img/RealTimeImg/jma_s/{YYYYMMDD}/{YYYYMMDDhhmmss}.jma_s.gif` | 常時・毎秒 |
 | 最大加速度など他の指標 | 同じ規則で `jma_s` を `acmap_s` 等に差し替え | 常時・毎秒 |
 | 予測円 (P/S 波) | `/data/map_img/PSWaveImg/eew/{YYYYMMDD}/{ts}.eew.gif` | **EEW 発表中のみ** |
-| 予想震度 | `/data/map_img/EstShindoImg/eew/{YYYYMMDD}/{ts}.eew.gif` | **EEW 発表中のみ** |
+| 予想震度 (このアプリは取得しない。上流仕様として記載) | `/data/map_img/EstShindoImg/eew/{YYYYMMDD}/{ts}.eew.gif` | **EEW 発表中のみ** |
 | 基図 (白地図) | `/data/map_img/CommonImg/base_map_w.gif` | 常時 |
+
+**このアプリは予想震度 (EstShindoImg) を取得しない**。配信データの解像度が
+1 画素 ≒ 4.6km しかなく、拡大表示では「補間するとにじんで海岸線からはみ出す」か
+「補間しないと巨大なブロックになる」かの二択にしかならない (5.9 倍表示で
+1 画素が約 30px)。予想震度は実測ではなく予報であり、同じ内容は EEW パネルの
+「予想最大震度」で足りるため、取得・配信・描画のすべてから外した。
+上流の仕様としての性質 (面であること・実測値ではないこと) は §1-3 の
+「予想震度・予測円画像の中身」に資料として残す。
 
 補助レイヤの URL 規則は kmoni 本体の JS (`MapCtrl.js`) から確認した。
 
@@ -155,15 +163,13 @@ $ curl -s http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json
   滑らかに変化していた。日向灘 M3.6 は規模が小さく、閾値を超えた所だけが
   飛び石状に残っていたため点に見えていただけで、実際は常に面であり、地震が
   大きいほど埋まって面らしく見える。
-- 表示側は面として画像のまま等倍で重ね、**補間はしない**
-  (`ctx.imageSmoothingEnabled = false`、`client/src/core/mapView.ts`)。
-  補間すると 1 画素が周囲へにじみ、海岸線からはみ出して位置がずれて見える。
-  切れば 1 画素が示す地理的な範囲 (約 4.4km 四方) そのものとして描かれ、
-  はみ出しも隙間も出ない。拡大すると四角いブロックに見えるが、それが配信
-  データの解像度そのものである。以前は「観測点ごとの点」という誤認から観測点と
-  同じ抽出経路で固定サイズの点として描いていたが、拡大時に画素の間隔が点の
-  大きさを上回り、格子状の隙間ができて観測点が急に増えたように見える不具合に
-  なっていた (2026-09-07 に画像描画へ戻して修正)。
+- 以前は面として画像のまま等倍で重ねていた (`ctx.imageSmoothingEnabled = false`)。
+  補間すると 1 画素が周囲へにじみ、海岸線からはみ出して位置がずれて見える一方、
+  補間しなければ 1 画素 (約 4.4km 四方) がそのまま四角いブロックとして見える。
+  拡大表示 (5.9 倍で 1 画素 ≒ 30px) ではどちらを選んでも実用にならないため、
+  現在は**取得・描画そのものをやめている**(`client/src/core/mapView.ts`
+  `drawKmoniLayers` 参照)。予想震度は実測ではなく予報であり、同じ内容は
+  EEW パネルの「予想最大震度」で足りる。
 - **予測円画像 (PSWaveImg) には P 波 (赤) / S 波 (青) の円のほかに、震央に
   1px 線の X マーカーが焼き込まれている** (震央中心 x±5 / y±5)。自前の震央マーカーと
   二重表示になるため、表示側ではこの矩形 (`KMONI_EPICENTER_MARK_RADIUS`,

@@ -1,9 +1,11 @@
+import { tsunamiGradeRank, type TsunamiArea } from '@quake-panel/shared';
 import { loadConfig } from './config.js';
 import { DemoRunner } from './demo/runner.js';
 import { EewCoordinator } from './eew/coordinator.js';
 import { createHttpServer } from './http/server.js';
 import { Hub } from './hub.js';
 import { createLogger, describeError, setLogLevel } from './logger.js';
+import { EventLog } from './notify/eventLog.js';
 import { WebhookNotifier } from './notify/webhookNotifier.js';
 import { applyGlobalProxy } from './proxy.js';
 import { KmoniClock } from './sources/kmoniClock.js';
@@ -24,20 +26,53 @@ function main(): Promise<void> {
   if (proxyUrl !== null) log.info(`upstream via proxy ${proxyUrl}`);
 
   const hub = new Hub(config);
+  // 地震イベントの事実記録 (JSONL)。dir が空なら EventLog 自身が何もしなくなる。
+  const eventLog = new EventLog(config);
   const clock = new KmoniClock(config, hub);
-  const frames = new KmoniFrameWorker(config, hub, clock);
+  const frames = new KmoniFrameWorker(config, hub, clock, eventLog);
   // URL が設定されているときだけ生成する。生成しなければ既存動作への影響はゼロ。
   const webhookNotifier =
-    config.eewWebhook.urls.length > 0 ? new WebhookNotifier(config) : null;
+    config.eewWebhook.urls.length > 0 ? new WebhookNotifier(config, eventLog) : null;
   if (webhookNotifier) log.info(`eew webhook to ${config.eewWebhook.urls.join(', ')}`);
   const coordinator = new EewCoordinator({
     config,
     hub,
     onActiveChange: (active) => frames.setEewActive(active),
     onEewEvent: (event) => webhookNotifier?.handle(event),
+    onLog: (data) => eventLog.write('eew', data),
   });
-  const kmoniEew = new KmoniEewWorker(config, hub, clock, (report) => coordinator.acceptKmoni(report));
+  const kmoniEew = new KmoniEewWorker(
+    config,
+    hub,
+    clock,
+    (report) => coordinator.acceptKmoni(report),
+    eventLog,
+    () => frames.isEewActive(),
+  );
   const p2p = new P2PClient(config, hub, (eew) => coordinator.acceptP2P(eew));
+
+  // 地震情報・EEW 発表検出・津波は抑止なく配信されるので、Hub の配信経路をそのまま
+  // 記録に使う (EEW だけは webhook 抑止・焼き直し破棄も追いたいので coordinator.onLog
+  // で別に配線している。上のコメント参照)。
+  hub.on('event', (event) => {
+    if (event.type === 'quake') {
+      eventLog.write('quake', {
+        id: event.quake.id,
+        occurredAt: event.quake.occurredAt,
+        hypocenter: { ...event.quake.hypocenter },
+        maxIntensity: event.quake.maxIntensity,
+      });
+    } else if (event.type === 'eewDetection') {
+      eventLog.write('eewDetection', { id: event.detection.id, kind: event.detection.kind });
+    } else if (event.type === 'tsunami') {
+      eventLog.write('tsunami', {
+        id: event.tsunami.id,
+        cancelled: event.tsunami.cancelled,
+        areaCount: event.tsunami.areas.length,
+        maxGrade: maxTsunamiGrade(event.tsunami.areas),
+      });
+    }
+  });
 
   // 実際の地震発生を待たずに動作確認するためのデモ再生。発火は設定画面のボタンのみ
   // (専用の HTTP エンドポイントは作らない)。Hub の通常配信経路にそのまま乗せるので、
@@ -46,7 +81,7 @@ function main(): Promise<void> {
   const demo = new DemoRunner(hub, (event) => webhookNotifier?.handle(event));
 
   const httpServer = createHttpServer(config, hub, frames);
-  const wsServer = new ClientWebSocketServer(httpServer, config, hub, demo);
+  const wsServer = new ClientWebSocketServer(httpServer, config, hub, demo, eventLog);
 
   // 終了処理の定義とハンドラ登録は、起動シーケンス (時刻同期・履歴取得。
   // 合わせて最長十数秒かかりうる) に入る前、各コンポーネントの生成が
@@ -72,6 +107,7 @@ function main(): Promise<void> {
     kmoniEew.stop();
     coordinator.stop();
     webhookNotifier?.stop();
+    eventLog.stop();
     p2p.stop();
     void wsServer.stop().then(() => {
       httpServer.close(() => process.exit(0));
@@ -107,6 +143,15 @@ function main(): Promise<void> {
       log.info(`listening on http://${config.host}:${config.port} (static: ${config.staticDir})`);
       log.info('データ提供: 防災科学技術研究所 強震モニタ / P2P地震情報');
     });
+}
+
+/** 津波予報区の中で最も重いグレード。区が無ければ null。 */
+function maxTsunamiGrade(areas: TsunamiArea[]): TsunamiArea['grade'] | null {
+  return areas.reduce<TsunamiArea['grade'] | null>(
+    (worst, area) =>
+      worst === null || tsunamiGradeRank(area.grade) > tsunamiGradeRank(worst) ? area.grade : worst,
+    null,
+  );
 }
 
 main().catch((error: Error) => {

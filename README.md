@@ -39,9 +39,11 @@
   白へ寄せる) を調整しているが、これは画面表示のための調整で、色から値を
   読み取る処理ではない。配信された画像を保存・再配布することもしない。
 - **独自の到達予測・震度予測を計算しない** (気象業務法の制限を受けるため)。
-  到達予測時刻は気象庁が配信した値をそのまま表示する。予測円と予想震度は
-  kmoni の配信画像をそのまま重ねているだけで、半径計算はしていない。
-  EEW パネルの「発震から N 秒」は経過時間であって予測ではない。
+  到達予測時刻は気象庁が配信した値をそのまま表示する。予測円は kmoni の配信画像
+  から半径を測ってベクタで描いているだけで、到達予測を自前で計算することはしない。
+  予想震度 (EstShindoImg) は予報であり実測ではないため取得自体をやめた
+  (`docs/kmoni-endpoints.md` §1-3)。EEW パネルの「発震から N 秒」は経過時間で
+  あって予測ではない。
 - **kmoni EEW JSON の内容を外部へ配信しない**。
 
 P2P地震情報は無料・登録不要・商用可だが、**WebSocket 接続は IP あたり 2 本**まで。
@@ -56,7 +58,7 @@ P2P地震情報は無料・登録不要・商用可だが、**WebSocket 接続�
 [サーバー / Docker コンテナ]
   取得系   P2P WebSocket ×1 (551/552/554/556)
            kmoni EEW JSON  毎秒ポーリング
-           kmoni 震度画像  毎秒ポーリング (EEW 中は予測円・予想震度も)
+           kmoni 震度画像  毎秒ポーリング (EEW 中は予測円も)
   配信系   静的ファイル / 自前 WebSocket / /kmoni/*.gif
   死活監視 kmoni 疎通断 → P2P 情報のみの劣化モードへ
 
@@ -194,6 +196,8 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 | `EEW_WEBHOOK_TIMEOUT_MS`                        | `5000`                                                                 | webhook 送信のタイムアウト                                                                                                                                              |
 | `WS_HEARTBEAT_MS`                               | `30000`                                                                | クライアント WS の ping 間隔                                                                                                                                            |
 | `QUAKE_HISTORY_SIZE`                            | `12`                                                                   | 保持する地震情報の件数                                                                                                                                                  |
+| `EVENT_LOG_DIR`                                 | `data/logs`                                                            | 地震イベントの記録 (JSONL) の置き場。空文字列を指定すると記録を無効にできる                                                                                             |
+| `EVENT_LOG_RETENTION_DAYS`                      | `30`                                                                   | イベント記録の保持日数 (1〜3650 に丸める)。古い日付のファイルは起動時と日付が変わるたびに削除                                                                          |
 
 ### 端末ごとの設定 (画面右上の「設定」)
 
@@ -293,13 +297,14 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 | `http://www.kmoni.bosai.go.jp/webservice/hypo/eew/{YYYYMMDDhhmmss}.json`                | HTTP/1.1 GET           | **毎秒**           | 緊急地震速報 (予報・警報)。無償で予報まで取れる唯一の経路       |
 | `http://www.kmoni.bosai.go.jp/data/map_img/RealTimeImg/jma_s/{YYYYMMDD}/{ts}.jma_s.gif` | HTTP/1.1 GET           | **毎秒**           | リアルタイム震度画像 (352×400 GIF、約 7.9KB)                    |
 | `http://www.kmoni.bosai.go.jp/data/map_img/PSWaveImg/eew/{YYYYMMDD}/{ts}.eew.gif`       | HTTP/1.1 GET           | EEW 発表中のみ毎秒 | P/S 波の予測円                                                  |
-| `http://www.kmoni.bosai.go.jp/data/map_img/EstShindoImg/eew/{YYYYMMDD}/{ts}.eew.gif`    | HTTP/1.1 GET           | EEW 発表中のみ毎秒 | 予想震度                                                        |
 | `wss://api.p2pquake.net/v2/ws`                                                          | **WebSocket over TLS** | 常時接続 **1 本**  | 551 地震情報 / 552 津波予報 / 554 EEW 発表検出 / 556 EEW (警報) |
 | `https://api.p2pquake.net/v2/history?codes=551&limit=12`                                | HTTPS GET              | 起動時 1 回        | 地震情報の履歴シード (起動直後に画面が空にならないように)       |
 | `https://api.p2pquake.net/v2/history?codes=552&limit=1`                                 | HTTPS GET              | 起動時 1 回        | 津波予報の現況シード                                            |
 
 宛先は環境変数で差し替えられる (`KMONI_BASE_URL` / `P2P_WS_URL` / `P2P_HISTORY_URL`)。
 検証時に上流をモックへ向けるときはここを変える。
+
+**予想震度 (EstShindoImg) は取得しない**。理由は `docs/kmoni-endpoints.md` §1-3 参照。
 
 注意点:
 
@@ -356,7 +361,6 @@ P2P_HISTORY_URL=http://127.0.0.1:8090/v2/history npm start
 | `GET /kmoni/latest.gif`         | HTTP(S)                            | 最新のリアルタイム震度画像 (`no-store`)                 |
 | `GET /kmoni/frame/{指標}/{ts}.gif` | HTTP(S)                          | 指標とタイムスタンプ指定。内容不変なのでキャッシュ可    |
 | `GET /kmoni/pswave/{ts}.gif`    | HTTP(S)                            | 予測円 (EEW 発表中のみ)                                 |
-| `GET /kmoni/estshindo/{ts}.gif` | HTTP(S)                            | 予想震度 (EEW 発表中のみ)                               |
 | `GET /api/state`                | HTTP(S)                            | 現況一括 (JSON)。デバッグ用                             |
 | `GET /healthz`                  | HTTP(S)                            | 死活。劣化モードでも P2P が生きていれば 200             |
 

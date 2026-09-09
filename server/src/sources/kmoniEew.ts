@@ -10,6 +10,7 @@ import {
 import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
+import type { EventLog } from '../notify/eventLog.js';
 import { fetchJson } from './httpClient.js';
 import type { KmoniClock } from './kmoniClock.js';
 
@@ -128,6 +129,10 @@ export class KmoniEewWorker {
     private readonly hub: Hub,
     private readonly clock: KmoniClock,
     private readonly onReport: (report: KmoniEewReport | null) => void,
+    /** EEW 発表中の取得失敗を記録する。未設定 (テストなど) なら何もしない。 */
+    private readonly eventLog?: EventLog,
+    /** いま EEW 発表中とみなせるか (frames.isEewActive() を渡す想定)。未設定なら常に記録しない。 */
+    private readonly isEewActive?: () => boolean,
   ) {}
 
   start(): void {
@@ -165,6 +170,9 @@ export class KmoniEewWorker {
       .catch((error: Error) => {
         this.hub.markFailure('kmoniEew', describeError(error));
         log.warn(`eew poll failed: ${describeError(error)}`);
+        if (this.isEewActive?.()) {
+          this.eventLog?.write('frameError', { url, reason: describeError(error) });
+        }
       })
       .then(() => {
         this.running = false;

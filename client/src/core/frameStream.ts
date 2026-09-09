@@ -6,7 +6,6 @@ export interface FrameImages {
   /** リアルタイム震度。これが取れなかったフレームは公開しないので必ず存在する。 */
   realtime: ImageBitmap;
   psWave: ImageBitmap | null;
-  estShindo: ImageBitmap | null;
 }
 
 /**
@@ -98,27 +97,23 @@ export class FrameStream {
       notice.layers.psWave
         ? loadBitmap(resolveUrl(ENDPOINTS.psWave(notice.timestamp)), controller.signal)
         : Promise.resolve(null),
-      notice.layers.estShindo
-        ? loadBitmap(resolveUrl(ENDPOINTS.estShindo(notice.timestamp)), controller.signal)
-        : Promise.resolve(null),
     ])
-      .then(([realtimeResult, psWaveResult, estShindoResult]) => {
+      .then(([realtimeResult, psWaveResult]) => {
         // allSettled なので個々の失敗 (中断・HTTP エラー等) で全体が reject
         // することはない。失敗した分は settledBitmap が null を返す。
         const realtime = settledBitmap(realtimeResult);
         const psWave = settledBitmap(psWaveResult);
-        const estShindo = settledBitmap(estShindoResult);
 
         if (controller.signal.aborted || !realtime) {
           // 採用しない (中断された・realtime が取れなかった) 場合は、
           // 生成済みの ImageBitmap を取りこぼさず必ず閉じる (リーク防止)。
           // 1 フレームの取りこぼし自体は次の通知で回復するので、ここでは
           // それ以上のことはしない。
-          closeAll(realtime, psWave, estShindo);
+          closeAll(realtime, psWave);
           return;
         }
 
-        const next: FrameImages = { notice, realtime, psWave, estShindo };
+        const next: FrameImages = { notice, realtime, psWave };
         this.release(this.current);
         this.current = next;
         this.onFrame(next);
@@ -131,7 +126,7 @@ export class FrameStream {
 
   private release(frame: FrameImages | null): void {
     if (!frame) return;
-    closeAll(frame.realtime, frame.psWave, frame.estShindo);
+    closeAll(frame.realtime, frame.psWave);
   }
 }
 

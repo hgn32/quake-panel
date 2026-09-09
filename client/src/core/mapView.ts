@@ -89,7 +89,7 @@ export class MapView {
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDistance: number | null = null;
   private scratch: HTMLCanvasElement | null = null;
-  /** 抽出済みの観測点。直近の 1 枚分だけ持つ (予想震度は画像描画に戻したので点は持たない)。 */
+  /** 抽出済みの観測点。直近の 1 枚分だけ持つ (予想震度は取得しないので点は持たない)。 */
   private points: Map<string, number[]> | null = null;
   private pointsFor: ImageBitmap | null = null;
   /**
@@ -99,6 +99,15 @@ export class MapView {
   private waveRadii: WaveRadii | null = null;
   private waveRadiiFor: ImageBitmap | null = null;
   private pick: ((location: { lat: number; lon: number }) => void) | null = null;
+  /**
+   * 直近の描画で実際に通った経路 (ログ用、`renderStatus()`)。
+   * 推測ではなく `drawWaveCircles` / `drawWaveImageFallback` / `realtimePoints` の
+   * 中で実際に選ばれた経路をそのつど控えているだけで、表示自体には使わない。
+   */
+  private renderWaveMode: 'vector' | 'image' | 'none' = 'none';
+  private renderWaveRadiusP: number | null = null;
+  private renderWaveRadiusS: number | null = null;
+  private renderPointMode: 'stations' | 'extract' = 'extract';
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -544,19 +553,12 @@ export class MapView {
    * いずれも同じ座標系で配信されるため、無変換で重ねられる。
    * ここでは重ねて表示するだけで、色から値を読み取るような処理は一切しない (§2(2))。
    *
-   * 予想震度は画素ごとに値を持つ「面」である (実測 2026-09-07 23:21 熊本県天草・
-   * 芦北地方の EEW: 不透明画素 2,517 個が x=1..69 / y=296..383 に連続して隙間なく
-   * 並び、隣り合う画素で値が滑らかに変化する)。2026-09-02 日向灘 M3.6 のような
-   * 小さい地震では閾値を超えた所だけが飛び石状に残ってまばらに見えるが、それは
-   * 規模が小さいからそう見えるだけで、点ではない。以前この誤認から観測点と同じ
-   * 抽出経路で点として描いていたが、拡大時に画素の間隔が点の大きさを上回って
-   * 格子状に見える不具合になっていた (面を点として描いたのが原因)。
-   *
-   * 面なので画像のまま重ねるが、補間はしない (`imageSmoothingEnabled = false`)。
-   * 補間すると 1 画素が周囲へにじみ、海岸線からはみ出して位置がずれて見える。
-   * 切れば 1 画素が示す地理的な範囲 (約 4.4km 四方) そのものとして描かれ、
-   * はみ出しも隙間も出ない。拡大すると四角いブロックに見えるが、それが配信
-   * データの解像度そのものである。
+   * 予想震度 (EstShindoImg) は取得・描画しない。配信データの解像度が
+   * 1 画素 ≒ 4.6km しかなく、拡大表示では「補間するとにじんで海岸線から
+   * はみ出す」か「補間しないと巨大なブロックになる」かの二択にしかならない
+   * (5.9 倍表示で 1 画素が約 30px)。予想震度はあくまで予報であり実測ではなく、
+   * 同じ内容は EEW パネルの「予想最大震度」で足りるため、このアプリでは
+   * 取得自体をやめた (`docs/kmoni-endpoints.md` §1-3 参照)。
    *
    * 予測円 (P波・S波) は原則ベクタで描く (`drawWaveCircles`)。震央と半径さえ
    * 分かれば円は自前で描け、配信画像 (352x400、1px 線) を拡大するよりも滑らかに
@@ -568,22 +570,40 @@ export class MapView {
     const frame = this.frame;
     if (!frame) return;
 
-    if (frame.estShindo) {
-      ctx.save();
-      ctx.translate(this.transform.offsetX, this.transform.offsetY);
-      ctx.scale(this.transform.scale, this.transform.scale);
-      ctx.imageSmoothingEnabled = false;
-      ctx.globalAlpha = 0.75;
-      ctx.drawImage(frame.estShindo, 0, 0, KMONI_MAP.width, KMONI_MAP.height);
-      ctx.restore();
-    }
-
     // 観測点は倍率によらず一定の大きさで描く (画像ごと拡大しない)
     this.drawPoints(ctx, frame.realtime, this.pointSize());
 
     if (frame.psWave) {
       this.drawWaveCircles(ctx, frame.psWave);
+    } else {
+      // 予測円画像が届いていない (EEW 未発表など)。ログ用の経路記録も揃えておく。
+      this.renderWaveMode = 'none';
+      this.renderWaveRadiusP = null;
+      this.renderWaveRadiusS = null;
     }
+  }
+
+  /**
+   * 直近の描画がどの経路だったか (ログ用)。
+   *
+   * `client/src/app.ts` が `sendClientLog` に渡すためのもので、表示には使わない。
+   * 推測ではなく `drawWaveCircles` / `drawWaveImageFallback` / `realtimePoints`
+   * の中で実際に選ばれた経路をそのまま返す。
+   */
+  renderStatus(): {
+    waveMode: 'vector' | 'image' | 'none';
+    waveRadiusP: number | null;
+    waveRadiusS: number | null;
+    pointMode: 'stations' | 'extract';
+    zoom: number;
+  } {
+    return {
+      waveMode: this.renderWaveMode,
+      waveRadiusP: this.renderWaveRadiusP,
+      waveRadiusS: this.renderWaveRadiusS,
+      pointMode: this.renderPointMode,
+      zoom: this.options.view.zoom,
+    };
   }
 
   /**
@@ -623,6 +643,9 @@ export class MapView {
       this.drawWaveImageFallback(ctx, bitmap);
       return;
     }
+    this.renderWaveMode = 'vector';
+    this.renderWaveRadiusP = radii.p;
+    this.renderWaveRadiusS = radii.s;
     const screenCenter = this.toScreen(lat, lon);
     ctx.save();
     // 画面上一定の太さで描く (配信画像の 1px 線を拡大するのではなく、
@@ -651,6 +674,9 @@ export class MapView {
    * ベクタ描画 (`drawWaveCircles`) が使われる。
    */
   private drawWaveImageFallback(ctx: CanvasRenderingContext2D, bitmap: ImageBitmap): void {
+    this.renderWaveMode = 'image';
+    this.renderWaveRadiusP = null;
+    this.renderWaveRadiusS = null;
     ctx.save();
     ctx.translate(this.transform.offsetX, this.transform.offsetY);
     ctx.scale(this.transform.scale, this.transform.scale);
@@ -721,7 +747,11 @@ export class MapView {
    * 意識しない。
    */
   private realtimePoints(bitmap: ImageBitmap): Map<string, number[]> {
-    if (this.stations.isLoaded()) return this.samplePoints(bitmap);
+    if (this.stations.isLoaded()) {
+      this.renderPointMode = 'stations';
+      return this.samplePoints(bitmap);
+    }
+    this.renderPointMode = 'extract';
     return this.extractPoints(bitmap);
   }
 

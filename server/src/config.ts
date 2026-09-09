@@ -15,6 +15,12 @@ const sec = (value: string | undefined, fallback: number): number => {
   return Math.min(Math.max(n, 0.5), 60);
 };
 
+/** 整数設定を min〜max に丸める (退避先ディスクを溢れさせないための保険)。 */
+const clampInt = (value: string | undefined, fallback: number, min: number, max: number): number => {
+  const n = Math.round(num(value, fallback));
+  return Math.min(Math.max(n, min), max);
+};
+
 export interface Config {
   port: number;
   host: string;
@@ -69,6 +75,12 @@ export interface Config {
     urls: string[];
     requestTimeoutMs: number;
   };
+  /** 地震イベントのログ (JSONL)。dir が空なら無効。 */
+  eventLog: {
+    dir: string;
+    /** 保持日数。1〜3650 に丸める。 */
+    retentionDays: number;
+  };
   logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
@@ -109,6 +121,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         .map((u) => u.trim())
         .filter((u) => u !== ''),
       requestTimeoutMs: num(env['EEW_WEBHOOK_TIMEOUT_MS'], 5000),
+    },
+    eventLog: {
+      // `str()` は空文字列を既定値へ戻してしまうため使わない。ここは
+      // 「明示的な空文字列 = 無効」を区別する必要がある (未設定時だけ既定を使う)。
+      dir: env['EVENT_LOG_DIR'] === undefined ? 'data/logs' : env['EVENT_LOG_DIR'].trim(),
+      retentionDays: clampInt(env['EVENT_LOG_RETENTION_DAYS'], 30, 1, 3650),
     },
     logLevel: (str(env['LOG_LEVEL'], 'info') as Config['logLevel']),
   };

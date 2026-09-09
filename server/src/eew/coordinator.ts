@@ -1,4 +1,4 @@
-import type { EewState } from '@quake-panel/shared';
+import type { EewState, JsonValue } from '@quake-panel/shared';
 import { intensityLabel } from '@quake-panel/shared';
 import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
@@ -28,6 +28,14 @@ export interface EewCoordinatorDeps {
   onActiveChange: (active: boolean) => void;
   /** EEW の状態が動くたびに呼ばれる (外部 webhook 通知など)。未設定なら何もしない。 */
   onEewEvent?: (event: EewEvent) => void;
+  /**
+   * 電文を処理するたびに呼ばれる記録用フック (`EventLog` への配線用)。
+   *
+   * `onEewEvent` は webhook 抑止 (`changed` が false) のときは呼ばれないが、
+   * こちらは抑止されたものも焼き直しとして捨てたものも含めて毎回呼ぶ。
+   * 「通知が3回飛んだ」のような問題をあとから追えるようにするのが目的。
+   */
+  onLog?: (data: Record<string, JsonValue>) => void;
 }
 
 /**
@@ -81,6 +89,7 @@ export class EewCoordinator {
   private accept(incoming: EewState): void {
     // 表示を終えた地震の焼き直し。復活させると new を撃ち直してしまう (§lastExpired)
     if (this.current === null && this.lastExpired !== null && isStaleRepeat(this.lastExpired, incoming)) {
+      this.deps.onLog?.(eewLogData(incoming, provisionalKind(incoming), false, true));
       return;
     }
 
@@ -88,7 +97,11 @@ export class EewCoordinator {
       this.current && isSameEvent(this.current, incoming)
         ? mergeStates(this.current, incoming)
         : this.pickNewer(incoming);
-    if (!merged) return;
+    if (!merged) {
+      // 表示中のものより明らかに古い電文として捨てた (pickNewer 参照)
+      this.deps.onLog?.(eewLogData(incoming, provisionalKind(incoming), false, true));
+      return;
+    }
 
     const previous = this.current;
     const isNew = !previous || !isSameEvent(previous, merged);
@@ -117,6 +130,7 @@ export class EewCoordinator {
     if (changed) {
       this.deps.onEewEvent?.({ kind, eew: merged });
     }
+    this.deps.onLog?.(eewLogData(merged, kind, changed, false));
   }
 
   /**
@@ -142,6 +156,7 @@ export class EewCoordinator {
     this.deps.hub.publishEew(null);
     this.deps.onActiveChange(false);
     this.deps.onEewEvent?.({ kind: 'expired', eew: expired });
+    this.deps.onLog?.(eewLogData(expired, 'expired', true, false));
   }
 
   /**
@@ -251,6 +266,48 @@ export function mergeStates(current: EewState, incoming: EewState): EewState {
       magnitude: newer.hypocenter.magnitude ?? older.hypocenter.magnitude,
     },
     source: current.source === incoming.source ? current.source : 'both',
+  };
+}
+
+/**
+ * 焼き直し・古い電文として捨てるときの `kind` (`onLog` 用)。
+ *
+ * 捨てた電文はマージを経ていないため `isNew`/`cancelRising` を計算できない。
+ * ログを追う側は「取消の立ち上がりかどうか」だけ分かれば十分なので、
+ * キャンセルなら 'cancel'、それ以外は 'update' として記録する。
+ */
+function provisionalKind(incoming: EewState): EewEventKind {
+  return incoming.isCancel ? 'cancel' : 'update';
+}
+
+/**
+ * `onLog` (EventLog 配線用) に渡す記録の形。
+ * webhook 抑止や焼き直し破棄も含めて呼ばれるため、`notified`/`stale` を持たせて区別する。
+ */
+function eewLogData(
+  state: EewState,
+  kind: EewEventKind,
+  notified: boolean,
+  stale: boolean,
+): Record<string, JsonValue> {
+  return {
+    kind,
+    id: state.id,
+    reportNumber: state.reportNumber,
+    isFinal: state.isFinal,
+    isCancel: state.isCancel,
+    alert: state.alert,
+    maxIntensity: state.maxIntensity,
+    hypocenter: {
+      name: state.hypocenter.name,
+      lat: state.hypocenter.lat,
+      lon: state.hypocenter.lon,
+      depthKm: state.hypocenter.depthKm,
+      magnitude: state.hypocenter.magnitude,
+    },
+    source: state.source,
+    notified,
+    stale,
   };
 }
 

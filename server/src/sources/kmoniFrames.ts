@@ -9,6 +9,7 @@ import {
 import type { Config } from '../config.js';
 import type { Hub } from '../hub.js';
 import { createLogger, describeError } from '../logger.js';
+import type { EventLog } from '../notify/eventLog.js';
 import { fetchBinary, type BinaryResponse } from './httpClient.js';
 import type { KmoniClock } from './kmoniClock.js';
 
@@ -24,8 +25,11 @@ const MAX_EXTRA_LAG_SEC = 6;
  *
  * 観測画像は指標ごとに分かれる (jma / acmap / …)。既定の指標は設定で決まり、
  * それ以外は「実際に見ている端末があるときだけ」取りに行く。
+ *
+ * 予想震度 (EstShindoImg) は取得しない (理由は `docs/kmoni-endpoints.md` §1-3、
+ * `client/src/core/mapView.ts` のコメント参照)。
  */
-export type FrameLayer = KmoniLayer | 'psWave' | 'estShindo';
+export type FrameLayer = KmoniLayer | 'psWave';
 
 /** 取得できた画像 (取得できなければ null) */
 type BinaryFrame = BinaryResponse;
@@ -92,6 +96,8 @@ export class KmoniFrameWorker {
     private readonly config: Config,
     private readonly hub: Hub,
     private readonly clock: KmoniClock,
+    /** EEW 発表中の取得失敗を記録する。未設定 (テストなど) なら何もしない。 */
+    private readonly eventLog?: EventLog,
   ) {}
 
   start(): void {
@@ -106,6 +112,11 @@ export class KmoniFrameWorker {
 
   setEewActive(active: boolean): void {
     this.eewActive = active;
+  }
+
+  /** EEW 発表中かどうか (frameError ログの記録条件に使う)。 */
+  isEewActive(): boolean {
+    return this.eewActive;
   }
 
   /** サーバーが既定で取りに行く指標 (KMONI_LAYER) */
@@ -201,6 +212,12 @@ export class KmoniFrameWorker {
       .catch((error: Error) => {
         this.hub.markFailure('kmoniImage', describeError(error));
         log.warn(`frame fetch failed: ${describeError(error)}`);
+        if (this.eewActive) {
+          this.eventLog?.write('frameError', {
+            layer: this.config.kmoni.layer,
+            reason: describeError(error),
+          });
+        }
       })
       .then(() => {
         this.running = false;
@@ -250,13 +267,11 @@ export class KmoniFrameWorker {
         .filter((layer) => layer !== this.config.kmoni.layer)
         .map((layer) => this.fetchLayer(layer, timestamp)),
     );
-    // 補助レイヤ (予測円・予想震度) は EEW 発表中だけ生成される
-    const aux = this.eewActive
-      ? Promise.all([this.tryFetch('psWave', timestamp), this.tryFetch('estShindo', timestamp)])
-      : Promise.resolve([false, false] as [boolean, boolean]);
+    // 補助レイヤ (予測円) は EEW 発表中だけ生成される
+    const aux = this.eewActive ? this.tryFetch('psWave', timestamp) : Promise.resolve(false);
 
-    return Promise.all([extras, aux]).then(([, [psWave, estShindo]]) =>
-      this.publishFrame(timestamp, { realtime: true, psWave, estShindo }),
+    return Promise.all([extras, aux]).then(([, psWave]) =>
+      this.publishFrame(timestamp, { realtime: true, psWave }),
     );
   }
 
@@ -276,8 +291,8 @@ export class KmoniFrameWorker {
     this.hub.publishFrame(notice);
   }
 
-  private tryFetch(layer: 'psWave' | 'estShindo', timestamp: string): Promise<boolean> {
-    const url = layer === 'psWave' ? this.psWaveUrl(timestamp) : this.estShindoUrl(timestamp);
+  private tryFetch(layer: 'psWave', timestamp: string): Promise<boolean> {
+    const url = this.psWaveUrl(timestamp);
     return fetchBinary(url, { timeoutMs: this.config.kmoni.requestTimeoutMs })
       .then((res) => {
         if (!res) return false;
@@ -287,6 +302,8 @@ export class KmoniFrameWorker {
       .catch((error: Error) => {
         // 補助レイヤの欠落は本体表示を止める理由にならないので握りつぶす。
         log.debug(`${layer} fetch failed: ${describeError(error)}`);
+        // ここは EEW 発表中 (this.eewActive) のときだけ呼ばれる経路 (acceptFrame の aux 参照)。
+        this.eventLog?.write('frameError', { layer, reason: describeError(error) });
         return false;
       });
   }
@@ -323,11 +340,6 @@ export class KmoniFrameWorker {
   private psWaveUrl(timestamp: string): string {
     const date = kmoniDatePart(timestamp);
     return `${this.config.kmoni.baseUrl}/data/map_img/PSWaveImg/eew/${date}/${timestamp}.eew.gif`;
-  }
-
-  private estShindoUrl(timestamp: string): string {
-    const date = kmoniDatePart(timestamp);
-    return `${this.config.kmoni.baseUrl}/data/map_img/EstShindoImg/eew/${date}/${timestamp}.eew.gif`;
   }
 }
 

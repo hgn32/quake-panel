@@ -297,17 +297,19 @@ describe('保持期限 (sweep)', () => {
     mock.timers.reset();
   });
 
-  /** hub の publishEew に渡った値と onEewEvent のイベントをすべて記録するフェイク */
+  /** hub の publishEew に渡った値・onEewEvent・onLog (EventLog 配線用) をすべて記録するフェイク */
   const makeSweepCoordinator = (config) => {
     const publishes = [];
     const events = [];
+    const logs = [];
     const coordinator = new EewCoordinator({
       config,
       hub: { publishEew: (eew) => publishes.push(eew) },
       onActiveChange: () => {},
       onEewEvent: (event) => events.push(event),
+      onLog: (data) => logs.push(data),
     });
-    return { coordinator, publishes, events };
+    return { coordinator, publishes, events, logs };
   };
 
   const hyugaReport = (patch = {}) => ({
@@ -411,6 +413,29 @@ describe('保持期限 (sweep)', () => {
       1,
       '焼き直しの電文で publishEew (表示の復活) が再び呼ばれている',
     );
+
+    coordinator.stop();
+  });
+
+  it('【回帰】焼き直しとして捨てた電文も onLog へ stale: true で記録される (通知が何度も飛んだ問題を後から追うため)', () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const { coordinator, logs } = makeSweepCoordinator(loadConfig({}));
+    coordinator.start();
+
+    const finalReport = hyugaReport({ reportNumber: 4, isFinal: true });
+    coordinator.acceptKmoni(finalReport);
+    mock.timers.tick(65_000); // 最終報の保持時間 (既定 60 秒) を超えて expired になる
+
+    const beforeRepeat = logs.length;
+    // kmoni は最終報のあとも同じ電文を返し続ける。表示終了後の焼き直しを模す。
+    coordinator.acceptKmoni(finalReport);
+
+    const staleLogs = logs.slice(beforeRepeat);
+    assert.equal(staleLogs.length, 1, '焼き直しの電文で onLog が呼ばれていない');
+    assert.equal(staleLogs[0].stale, true, '焼き直しなのに stale: true が記録されていない');
+    assert.equal(staleLogs[0].notified, false, '焼き直しなのに notified: false が記録されていない');
+    assert.equal(staleLogs[0].id, finalReport.id);
+    assert.equal(staleLogs[0].reportNumber, finalReport.reportNumber);
 
     coordinator.stop();
   });

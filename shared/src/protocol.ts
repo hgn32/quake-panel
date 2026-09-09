@@ -1,6 +1,7 @@
 import type { JsonValue } from './homeLocation.js';
 import type { KmoniLayer } from './kmoniLayer.js';
 import type {
+  ClientRenderLog,
   EewDetection,
   EewState,
   FrameNotice,
@@ -49,7 +50,9 @@ export type ClientMessage =
   /** デモ再生の発火。実電文と同形のイベントを通常配信経路で全端末に流す。 */
   | { type: 'demo'; scenario: DemoScenario }
   /** 進行中のデモを即時停止し、表示も消す。確認なしで全端末に効く安全側の操作。 */
-  | { type: 'demo-stop' };
+  | { type: 'demo-stop' }
+  /** 描画状況の記録 (EventLog へ流す。実機の描画経路をあとから追うため)。 */
+  | { type: 'clientLog'; log: ClientRenderLog };
 
 /** デモ再生の id に必ず付く接頭辞。実電文の id には出現しない前提。 */
 const DEMO_ID_PREFIX = 'demo-';
@@ -90,8 +93,15 @@ export const ENDPOINTS = {
   frame: (layer: KmoniLayer, timestamp: string) => `/kmoni/frame/${layer}/${timestamp}.gif`,
   /** EEW 発表中の予測円 */
   psWave: (timestamp: string) => `/kmoni/pswave/${timestamp}.gif`,
-  /** EEW 発表中の予想震度 */
-  estShindo: (timestamp: string) => `/kmoni/estshindo/${timestamp}.gif`,
 } as const;
 
-export type { EewDetection, EewState, FrameNotice, HealthState, QuakeInfo, StateSnapshot, TsunamiInfo };
+export type {
+  ClientRenderLog,
+  EewDetection,
+  EewState,
+  FrameNotice,
+  HealthState,
+  QuakeInfo,
+  StateSnapshot,
+  TsunamiInfo,
+};

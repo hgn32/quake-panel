@@ -3,6 +3,7 @@ import { Agent, fetch } from 'undici';
 import type { Config } from '../config.js';
 import type { EewEvent } from '../eew/coordinator.js';
 import { createLogger, describeError } from '../logger.js';
+import type { EventLog } from './eventLog.js';
 
 const log = createLogger('webhook');
 
@@ -31,7 +32,11 @@ export class WebhookNotifier {
   private readonly tails = new Map<string, Promise<void>>();
   private stopped = false;
 
-  constructor(config: Config) {
+  constructor(
+    config: Config,
+    /** 送信のたびに記録する。未設定 (テストなど) なら何もしない。 */
+    private readonly eventLog?: EventLog,
+  ) {
     this.urls = config.eewWebhook.urls;
     this.requestTimeoutMs = config.eewWebhook.requestTimeoutMs;
   }
@@ -67,10 +72,17 @@ export class WebhookNotifier {
         if (!res.ok) {
           log.warn(`webhook ${url} responded ${res.status}`);
         }
+        this.eventLog?.write('webhook', { url, kind: payload.kind, status: res.status, error: null });
       })
       .catch((error: Error) => {
         // リトライはしない。外部システムの不調で本体の動作を止めないため。
         log.warn(`webhook ${url} failed`, describeError(error));
+        this.eventLog?.write('webhook', {
+          url,
+          kind: payload.kind,
+          status: null,
+          error: describeError(error),
+        });
       });
   }
 

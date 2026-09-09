@@ -142,11 +142,38 @@ export interface FrameNotice {
     realtime: boolean;
     /** EEW 発表中のみ配信される予測円 */
     psWave: boolean;
-    /** EEW 発表中のみ配信される予想震度 */
-    estShindo: boolean;
   };
   /** kmoni の表示時刻とサーバー現在時刻の差 (ms) */
   latencyMs: number;
+}
+
+/**
+ * クライアントが送る描画状況の記録 (サーバーのイベントログにそのまま残す)。
+ *
+ * 「ベクタ描画が効いているのか」「どのビルドが動いているのか」を、画面を見た推測
+ * ではなくログで確定できるようにするためのもの (`client/src/core/mapView.ts` の
+ * `renderStatus()` が実際に通った経路を控え、`client/src/app.ts` が送信する)。
+ */
+export interface ClientRenderLog {
+  /** 画面のビルド (コミットハッシュ)。開発版なら空文字列 */
+  commit: string;
+  /** 画面のビルド日時 (JST) */
+  builtAt: string;
+  /** 表示中の EEW の識別子。無ければ空文字列 */
+  eewId: string;
+  /** 予測円の描き方: vector=自前描画 / image=画像フォールバック / none=画像が無い */
+  waveMode: 'vector' | 'image' | 'none';
+  /** 測れた半径 (配信画像のピクセル)。測れなければ null */
+  waveRadiusP: number | null;
+  waveRadiusS: number | null;
+  /** 観測点の描き方: stations=観測点表 / extract=塊抽出 */
+  pointMode: 'stations' | 'extract';
+  /** 表示中の指標 (jma/acmap/vcmap/dcmap) */
+  layer: string;
+  /** 明滅の強さ (none/forecast/warning/tsunami) */
+  flash: string;
+  /** 地図の拡大率 */
+  zoom: number;
 }
 
 export interface SourceStatus {

@@ -11,7 +11,6 @@ const log = createLogger('http');
 /** EEW 発表中の補助レイヤ。観測画像は指標を含む別のルートで扱う。 */
 const FRAME_ROUTES: Array<{ prefix: string; layer: FrameLayer }> = [
   { prefix: '/kmoni/pswave/', layer: 'psWave' },
-  { prefix: '/kmoni/estshindo/', layer: 'estShindo' },
 ];
 
 /** `/kmoni/frame/{指標}/{時刻}.gif` */
@@ -81,8 +80,8 @@ export function createHttpServer(
       sendImage(res, frames.getLatest(frames.defaultLayer), 'no-store');
       return Promise.resolve();
     }
-    if (path === '/kmoni/pswave/latest.gif' || path === '/kmoni/estshindo/latest.gif') {
-      sendImage(res, frames.getLatest(path.includes('pswave') ? 'psWave' : 'estShindo'), 'no-store');
+    if (path === '/kmoni/pswave/latest.gif') {
+      sendImage(res, frames.getLatest('psWave'), 'no-store');
       return Promise.resolve();
     }
 

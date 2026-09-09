@@ -8,6 +8,7 @@ import {
   tsunamiAlertRank,
   tsunamiAreasForPrefecture,
   type KmoniLayer,
+  type ClientRenderLog,
   type EewRelevance,
   type EewState,
   type HealthState,
@@ -62,6 +63,12 @@ const REALTIME_SCALE_COLORS = [
 ];
 
 /**
+ * 描画状況ログ (`ClientRenderLog`) を送る間隔。
+ * EEW を表示している間だけ動くタイマーで、この秒数ごとに 1 回送る (§app.ts 送信タイミング)。
+ */
+const CLIENT_LOG_INTERVAL_MS = 10_000;
+
+/**
  * 画面全体の取りまとめ。
  *
  * 毎秒更新される描画は MapView / FrameStream が担い、ここは
@@ -93,6 +100,8 @@ export class App {
   private testFlashTimer: number | null = null;
   private viewSaveTimer: number | null = null;
   private sideSaveTimer: number | null = null;
+  /** 描画状況ログを EEW 表示中に 10 秒ごと送るためのタイマー。 */
+  private clientLogTimer: number | null = null;
   /** 利用地ピック中のセッションを丸ごと破棄する関数。再入したときに前回分を必ず片付けるために使う。 */
   private homePickCancel: (() => void) | null = null;
 
@@ -240,6 +249,7 @@ export class App {
   }
 
   private applyEew(eew: EewState | null): void {
+    const previousId = this.eew?.id ?? null;
     this.eew = eew;
     const relevance = this.eewRelevanceNow(eew);
     this.eewPanel.update(eew, relevance);
@@ -247,6 +257,61 @@ export class App {
     this.alert.applyEewSound(eew, this.settings.notifyForecast, relevance);
     this.refreshFlash();
     this.refreshDemoBanner();
+    this.syncClientLog(previousId, eew);
+  }
+
+  /**
+   * 描画状況ログの送信タイミング。次の 3 つだけに絞る (平常時に垂れ流さないため)。
+   *   1. EEW を新しく表示したとき (eewId が変わったとき) に 1 回
+   *   2. 表示している間、10 秒ごとに 1 回 (`clientLogTimer`)
+   *   3. 表示が終わったとき (eew が null になったとき) に 1 回
+   */
+  private syncClientLog(previousId: string | null, eew: EewState | null): void {
+    const currentId = eew?.id ?? null;
+    if (currentId !== null && currentId !== previousId) {
+      this.startClientLogTimer();
+      this.sendClientLog(currentId);
+      return;
+    }
+    if (currentId === null && previousId !== null) {
+      this.stopClientLogTimer();
+      this.sendClientLog('');
+    }
+  }
+
+  private startClientLogTimer(): void {
+    if (this.clientLogTimer !== null) return;
+    this.clientLogTimer = window.setInterval(() => {
+      if (this.eew) this.sendClientLog(this.eew.id);
+    }, CLIENT_LOG_INTERVAL_MS);
+  }
+
+  private stopClientLogTimer(): void {
+    if (this.clientLogTimer !== null) window.clearInterval(this.clientLogTimer);
+    this.clientLogTimer = null;
+  }
+
+  /**
+   * 描画状況をサーバーへ送る。
+   * `eewId` が空文字列 (表示終了) のときは、mapView がまだ次のフレームを
+   * 描き切っていなくても波の状態を確実に none にする (実態と食い違わせないため)。
+   */
+  private sendClientLog(eewId: string): void {
+    const status = this.mapView.renderStatus();
+    const ended = eewId === '';
+    const log: ClientRenderLog = {
+      commit: __COMMIT_HASH__,
+      builtAt: __BUILD_DATE__,
+      eewId,
+      waveMode: ended ? 'none' : status.waveMode,
+      waveRadiusP: ended ? null : status.waveRadiusP,
+      waveRadiusS: ended ? null : status.waveRadiusS,
+      pointMode: status.pointMode,
+      layer: this.currentLayer(),
+      flash: this.alert.getFlash(),
+      zoom: status.zoom,
+    };
+    this.connection.sendClientLog(log);
   }
 
   private applyTsunami(info: TsunamiInfo | null): void {
@@ -672,6 +737,7 @@ export class App {
     if (this.testFlashTimer !== null) window.clearTimeout(this.testFlashTimer);
     if (this.viewSaveTimer !== null) window.clearTimeout(this.viewSaveTimer);
     if (this.sideSaveTimer !== null) window.clearTimeout(this.sideSaveTimer);
+    this.stopClientLogTimer();
     document.removeEventListener('pointerdown', this.handleOutsidePointerDown);
     this.connection.stop();
     this.frames.dispose();

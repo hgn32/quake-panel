@@ -2,6 +2,7 @@ import {
   ENDPOINTS,
   isServerEvent,
   type ClientMessage,
+  type ClientRenderLog,
   type DemoScenario,
   type JsonValue,
   type ServerEvent,
@@ -78,6 +79,14 @@ export class ServerConnection {
   /** 設定画面のデモ停止ボタンから。進行中のデモを全端末で即時停止させる。戻り値は sendDemo と同じ。 */
   sendDemoStop(): boolean {
     return this.send({ type: 'demo-stop' });
+  }
+
+  /**
+   * 描画状況の記録をサーバーへ送る (`app.ts` から)。
+   * サーバーの EventLog にそのまま残るだけで、表示には使わない。切断中は諦める。
+   */
+  sendClientLog(log: ClientRenderLog): boolean {
+    return this.send({ type: 'clientLog', log });
   }
 
   private setState(state: ConnectionState): void {
