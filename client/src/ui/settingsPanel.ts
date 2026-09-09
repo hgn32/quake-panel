@@ -345,9 +345,18 @@ export class SettingsPanel {
     );
   }
 
-  /** ビルド時のコミットハッシュ。vite.config.ts の define で埋め込まれる。 */
+  /**
+   * ビルド時のコミットハッシュとビルド日時。vite.config.ts の define で埋め込まれる。
+   *
+   * ハッシュだけだと「そのコミットで作り直した成果物が動いているのか」が判断できず、
+   * 古いビルドのまま「直っていない」と誤認しうる。ビルド日時を並べて出す。
+   */
   private versionFooter(): HTMLElement {
-    const label = __COMMIT_HASH__ ? `バージョン: ${__COMMIT_HASH__}` : 'バージョン: 開発版';
+    const version = __COMMIT_HASH__ === '' ? '開発版' : __COMMIT_HASH__;
+    const label =
+      __BUILD_DATE__ === ''
+        ? `バージョン: ${version}`
+        : `バージョン: ${version} (${__BUILD_DATE__} ビルド)`;
     return h('p', { class: 'settings__version', text: label });
   }
 
